@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Permisos de ubicación -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Necesitamos tu ubicación para sugerirte direcciones cercanas y como punto de recogida</string>
+	
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Comforta necesita acceso a tu ubicación para mejorar tu experiencia</string>
+	
+	<!-- URL Schemes para OAuth -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.845378801590-sic5hv8uoup16tfnhn69ken3eppd4fin</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
