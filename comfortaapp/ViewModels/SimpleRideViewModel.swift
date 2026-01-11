@@ -20,6 +20,10 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
     @Published var estimatedDuration: String = ""
     @Published var errorMessage: String?
     @Published var routePolyline: MKPolyline?
+    @Published var isCalculatingRoute: Bool = false
+    @Published var currentTripState: TripState = .searchingLocations
+    @Published var assignedDriver: Driver?
+    @Published var currentTrip: Trip?
     
     @Published var mapRegion = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 40.4168, longitude: -3.7038),
@@ -31,6 +35,10 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
     private let destinationCompleter = MKLocalSearchCompleter()
     private let locationManager = CLLocationManager()
     private let geocoder = CLGeocoder()
+    private let pricingService = PricingServiceAPI.shared
+    private let tripService = TripServiceAPI.shared
+    private var pricingEstimate: PricingResponse?
+    private var hasInitializedPickup = false
     
     var pickupCoordinate: CLLocationCoordinate2D?
     var destinationCoordinate: CLLocationCoordinate2D?
@@ -94,7 +102,11 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
         estimatedFare = "Introduce ubicaciones"
         estimatedDistance = ""
         estimatedDuration = ""
+        pricingEstimate = nil
         routePolyline = nil
+        currentTripState = .searchingLocations
+        assignedDriver = nil
+        currentTrip = nil
         deactivateFields()
     }
     
@@ -198,54 +210,71 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
         destinationCompleter.region = mapRegion
     }
     
-    private func calculateFare() {
+    func calculateFare() {
         guard let pickup = pickupCoordinate,
               let destination = destinationCoordinate else {
             estimatedFare = "Selecciona ubicaciones"
             estimatedDistance = ""
             estimatedDuration = ""
             routePolyline = nil
+            isCalculatingRoute = false
             return
         }
-        
+
         print("🧮 Starting route calculation...")
-        
+        estimatedFare = "Calculando..."
+        isCalculatingRoute = true
+
+        let originAddress = pickupText.isEmpty ? nil : pickupText
+        let destinationAddress = destinationText
+
         Task {
-            do {
-                let route = try await calculateRoute(from: pickup, to: destination)
-                
-                await MainActor.run {
-                    let distanceKm = route.distance / 1000
-                    let fare = calculateFareAmount(for: distanceKm)
-                    
-                    estimatedDistance = String(format: "%.1f km", distanceKm)
-                    estimatedFare = fare.formatted(.currency(code: "EUR").locale(Locale(identifier: "es_ES")))
-                    estimatedDuration = formatDuration(route.expectedTravelTime)
+            let routeTask = Task { try await calculateRoute(from: pickup, to: destination) }
+            let pricingTask = Task {
+                try await pricingService.calculatePricing(
+                    origin: originAddress,
+                    destination: destinationAddress
+                )
+            }
+
+            let route = try? await routeTask.value
+            let pricing = try? await pricingTask.value
+
+            await MainActor.run {
+                let distanceKm: Double
+                let duration: TimeInterval
+                let distanceLabelSuffix: String
+
+                if let route = route {
+                    distanceKm = route.distance / 1000
+                    duration = route.expectedTravelTime
+                    distanceLabelSuffix = ""
                     routePolyline = route.polyline
-                    
-                    // Update map region to show both points
-                    updateMapRegionForRoute(pickup: pickup, destination: destination)
-                    
-                    print("💰 Route calculated: \(estimatedFare) for \(estimatedDistance) in \(estimatedDuration)")
-                }
-            } catch {
-                await MainActor.run {
-                    // Fallback to straight-line calculation
+                } else {
                     let pickupLocation = CLLocation(latitude: pickup.latitude, longitude: pickup.longitude)
                     let destinationLocation = CLLocation(latitude: destination.latitude, longitude: destination.longitude)
                     let distance = pickupLocation.distance(from: destinationLocation)
-                    let distanceKm = distance / 1000
-                    
-                    let fare = calculateFareAmount(for: distanceKm)
-                    
-                    estimatedDistance = String(format: "%.1f km (línea recta)", distanceKm)
-                    estimatedFare = fare.formatted(.currency(code: "EUR").locale(Locale(identifier: "es_ES")))
-                    estimatedDuration = formatDuration(distanceKm * 60) // Estimate 1 km per minute
-                    
-                    updateMapRegionForRoute(pickup: pickup, destination: destination)
-                    
-                    print("💰 Fallback calculation: \(estimatedFare) for \(estimatedDistance)")
+                    distanceKm = distance / 1000
+                    duration = distanceKm * 60
+                    distanceLabelSuffix = " (línea recta)"
+                    routePolyline = nil
                 }
+
+                pricingEstimate = pricing
+
+                let fare = pricing?.totalPrice ?? calculateFareAmount(for: distanceKm)
+
+                estimatedDistance = String(format: "%.1f km%@", distanceKm, distanceLabelSuffix)
+                estimatedFare = fare.formatted(.currency(code: "EUR").locale(Locale(identifier: "es_ES")))
+                estimatedDuration = formatDuration(duration)
+
+                updateMapRegionForRoute(pickup: pickup, destination: destination)
+
+                print("💰 Route calculated: \(estimatedFare) for \(estimatedDistance) in \(estimatedDuration)")
+                isCalculatingRoute = false
+
+                createCurrentTrip()
+                currentTripState = .readyToConfirm
             }
         }
     }
@@ -322,6 +351,33 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
         
         return components.isEmpty ? "Ubicación actual" : components.joined(separator: ", ")
     }
+    
+    // MARK: - Public Setters
+    func setPickup(address: String, coordinate: CLLocationCoordinate2D) {
+        pickupText = address
+        pickupCoordinate = coordinate
+        updateMapRegion(to: coordinate)
+        calculateFare()
+    }
+    
+    func setDestination(address: String, coordinate: CLLocationCoordinate2D) {
+        destinationText = address
+        destinationCoordinate = coordinate
+        updateMapRegion(to: coordinate)
+        calculateFare()
+    }
+    
+    func swapLocations() {
+        guard let pickup = pickupCoordinate, let destination = destinationCoordinate else { return }
+        let pickupTextCopy = pickupText
+        let destinationTextCopy = destinationText
+        pickupCoordinate = destination
+        destinationCoordinate = pickup
+        pickupText = destinationTextCopy
+        destinationText = pickupTextCopy
+        updateMapRegionForRoute(pickup: pickupCoordinate!, destination: destinationCoordinate!)
+        calculateFare()
+    }
 }
 
 // MARK: - CLLocationManagerDelegate
@@ -343,6 +399,23 @@ extension SimpleRideViewModel: CLLocationManagerDelegate {
         currentLocation = location
         updateMapRegion(to: location.coordinate)
         print("📍 Location updated: \(location.coordinate)")
+        
+        if !hasInitializedPickup && pickupCoordinate == nil {
+            hasInitializedPickup = true
+            Task {
+                do {
+                    let placemarks = try await geocoder.reverseGeocodeLocation(location)
+                    let address = placemarks.first.map { self.formatAddress(from: $0) } ?? "Ubicación actual"
+                    await MainActor.run {
+                        self.setPickup(address: address, coordinate: location.coordinate)
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.setPickup(address: "Ubicación actual", coordinate: location.coordinate)
+                    }
+                }
+            }
+        }
     }
     
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -374,6 +447,188 @@ extension SimpleRideViewModel: MKLocalSearchCompleterDelegate {
             } else if completer == self.destinationCompleter {
                 self.destinationSuggestions.removeAll()
             }
+        }
+    }
+    
+    // MARK: - Trip Flow Methods
+    
+    func confirmTrip() {
+        guard let pickup = pickupCoordinate,
+              let destination = destinationCoordinate else { return }
+        
+        currentTripState = .confirmingTrip
+        
+        // Simulate trip creation and driver assignment
+        Task {
+            await MainActor.run {
+                currentTripState = .processingPayment
+                errorMessage = nil
+            }
+
+            do {
+                let apiTrip = try await tripService.createTrip(
+                    pickupLocation: pickupText.isEmpty ? nil : pickupText,
+                    destination: destinationText,
+                    startDate: Date(),
+                    notes: nil,
+                    distanceKm: pricingEstimate?.distance ?? parseEstimatedDistance(),
+                    basePrice: pricingEstimate?.basePrice,
+                    totalPrice: pricingEstimate?.totalPrice ?? parseEstimatedFare()
+                )
+
+                await MainActor.run {
+                    let pickupLocation = LocationInfo(
+                        address: pickupText,
+                        coordinate: pickup
+                    )
+                    let destinationLocation = LocationInfo(
+                        address: destinationText,
+                        coordinate: destination
+                    )
+                    let paymentMethod = PaymentMethodInfo(type: .cash)
+
+                    currentTrip = Trip(
+                        userId: AuthServiceAPI.shared.currentUser?.id ?? "user",
+                        pickupLocation: pickupLocation,
+                        destinationLocation: destinationLocation,
+                        estimatedFare: apiTrip.precioTotal ?? parseEstimatedFare(),
+                        estimatedDistance: apiTrip.distanciaKm ?? parseEstimatedDistance(),
+                        estimatedDuration: parseEstimatedDuration(),
+                        vehicleType: "Standard",
+                        paymentMethod: paymentMethod
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Error al crear el viaje"
+                    currentTripState = .readyToConfirm
+                }
+                return
+            }
+
+            await MainActor.run {
+                currentTripState = .findingDriver
+            }
+
+            // Simulate finding driver
+            try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+
+            await MainActor.run {
+                // Create mock driver
+                let mockVehicle = VehicleInfo(
+                    make: "Tesla",
+                    model: "Model Y",
+                    year: 2023,
+                    color: "Blanco",
+                    licensePlate: "ABC1234",
+                    capacity: 4,
+                    vehicleType: .sedan
+                )
+
+                assignedDriver = Driver(
+                    userId: "driver123",
+                    licenseNumber: "ES123456789",
+                    name: "Carlos Rodríguez",
+                    vehicleInfo: mockVehicle
+                )
+
+                currentTripState = .driverAssigned
+            }
+        }
+    }
+    
+    private func parseEstimatedFare() -> Double {
+        if let pricing = pricingEstimate {
+            return pricing.totalPrice
+        }
+        // Extract numeric value from "€25,50" format
+        let cleanedString = estimatedFare.replacingOccurrences(of: "€", with: "")
+                                      .replacingOccurrences(of: ",", with: ".")
+        return Double(cleanedString) ?? 25.0
+    }
+    
+    private func parseEstimatedDistance() -> Double {
+        if let pricing = pricingEstimate {
+            return pricing.distance
+        }
+        // Extract numeric value from "15.5 km" format
+        let components = estimatedDistance.components(separatedBy: " ")
+        if let firstComponent = components.first,
+           let distance = Double(firstComponent.replacingOccurrences(of: ",", with: ".")) {
+            return distance
+        }
+        return 15.0
+    }
+    
+    private func parseEstimatedDuration() -> Double {
+        // Simple parsing for now - in minutes
+        return 25.0 * 60 // 25 minutes in seconds
+    }
+    
+    private func createCurrentTrip() {
+        guard let pickup = pickupCoordinate,
+              let destination = destinationCoordinate else { return }
+        
+        let pickupLocation = LocationInfo(
+            address: pickupText,
+            coordinate: pickup
+        )
+        let destinationLocation = LocationInfo(
+            address: destinationText,
+            coordinate: destination
+        )
+        let paymentMethod = PaymentMethodInfo(type: .cash)
+        
+        currentTrip = Trip(
+            userId: "user123",
+            pickupLocation: pickupLocation,
+            destinationLocation: destinationLocation,
+            estimatedFare: parseEstimatedFare(),
+            estimatedDistance: parseEstimatedDistance(),
+            estimatedDuration: parseEstimatedDuration(),
+            vehicleType: "Standard",
+            paymentMethod: paymentMethod
+        )
+    }
+}
+
+enum TripState {
+    case searchingLocations
+    case readyToConfirm
+    case confirmingTrip
+    case processingPayment
+    case findingDriver
+    case driverAssigned
+    case driverEnRoute
+    case driverArrived
+    case inProgress
+    case completed
+    case cancelled
+    
+    var displayName: String {
+        switch self {
+        case .searchingLocations:
+            return "Selecciona tus ubicaciones"
+        case .readyToConfirm:
+            return "Listo para confirmar"
+        case .confirmingTrip:
+            return "Confirmando viaje..."
+        case .processingPayment:
+            return "Procesando pago..."
+        case .findingDriver:
+            return "Buscando conductor..."
+        case .driverAssigned:
+            return "Conductor asignado"
+        case .driverEnRoute:
+            return "Conductor en camino"
+        case .driverArrived:
+            return "Conductor ha llegado"
+        case .inProgress:
+            return "Viaje en progreso"
+        case .completed:
+            return "Viaje completado"
+        case .cancelled:
+            return "Viaje cancelado"
         }
     }
 }

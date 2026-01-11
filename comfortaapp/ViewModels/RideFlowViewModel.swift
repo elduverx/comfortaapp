@@ -7,7 +7,7 @@ import CoreLocation
 final class RideFlowViewModel: ObservableObject {
     
     // MARK: - Published Properties
-    @Published var currentStatus: RideStatus = .requested
+    @Published var currentStatus: TripStatus = .requested
     @Published var tripData: TripData
     @Published var assignedDriver: Driver?
     @Published var showingCancellationAlert = false
@@ -46,9 +46,10 @@ final class RideFlowViewModel: ObservableObject {
         ))
         
         // Show driver if assigned
-        if let driver = assignedDriver {
+        if let driver = assignedDriver,
+           let coordinate = driver.currentCoordinate {
             annotations.append(RideMapAnnotation(
-                coordinate: driver.currentLocation,
+                coordinate: coordinate,
                 type: .driver,
                 title: driver.name
             ))
@@ -81,7 +82,8 @@ final class RideFlowViewModel: ObservableObject {
     func callDriver() {
         guard let driver = assignedDriver else { return }
         // Implement call functionality
-        print("Calling driver: \(driver.name) at \(driver.phoneNumber)")
+        let phone = driver.phoneNumber ?? "N/A"
+        print("Calling driver: \(driver.name) at \(phone)")
     }
     
     func messageDriver() {
@@ -124,31 +126,51 @@ final class RideFlowViewModel: ObservableObject {
         // Simulate finding a driver (3-8 seconds)
         let findDriverDelay = Double.random(in: 3...8)
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + findDriverDelay) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + findDriverDelay) { [weak self] in
+            guard let self else { return }
+            guard self.currentStatus != .cancelled else { return }
             self.assignDriver()
         }
     }
     
     private func assignDriver() {
-        // Create mock driver
-        let mockDriver = Driver(
-            id: UUID().uuidString,
-            name: ["Carlos", "María", "David", "Ana", "Luis"].randomElement()!,
-            rating: Double.random(in: 4.2...4.9),
-            vehicleModel: ["Toyota Prius", "Nissan Leaf", "Honda Civic", "Volkswagen Golf"].randomElement()!,
-            vehiclePlate: generateRandomPlate(),
-            vehicleColor: ["Blanco", "Negro", "Gris", "Azul"].randomElement()!,
-            phoneNumber: "+34 6\(String(format: "%08d", Int.random(in: 10000000...99999999)))",
-            currentLocation: generateDriverLocation(),
-            estimatedArrival: Double.random(in: 300...900) // 5-15 minutes
+        let vehicleOptions = [
+            ("Toyota", "Prius"),
+            ("Nissan", "Leaf"),
+            ("Honda", "Civic"),
+            ("Volkswagen", "Golf")
+        ]
+        let selectedVehicle = vehicleOptions.randomElement()!
+        let vehicleInfo = VehicleInfo(
+            make: selectedVehicle.0,
+            model: selectedVehicle.1,
+            year: Int.random(in: 2018...2024),
+            color: ["Blanco", "Negro", "Gris", "Azul"].randomElement()!,
+            licensePlate: generateRandomPlate(),
+            capacity: 4,
+            vehicleType: .sedan
         )
+        
+        var mockDriver = Driver(
+            userId: UUID().uuidString,
+            licenseNumber: "LIC\(Int.random(in: 10000...99999))",
+            name: ["Carlos", "María", "David", "Ana", "Luis"].randomElement()!,
+            vehicleInfo: vehicleInfo
+        )
+        
+        mockDriver.rating = Double.random(in: 4.2...4.9)
+        mockDriver.phoneNumber = "+34 6\(String(format: "%08d", Int.random(in: 10000000...99999999)))"
+        mockDriver.currentLocation = LocationData(coordinate: generateDriverLocation())
+        mockDriver.estimatedArrival = Double.random(in: 300...900) // 5-15 minutes
         
         assignedDriver = mockDriver
         currentStatus = .driverAssigned
         calculateEstimatedArrival()
         
         // Simulate driver en route after 2 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self else { return }
+            guard self.currentStatus != .cancelled else { return }
             self.currentStatus = .driverEnRoute
             self.startDriverLocationUpdates()
         }
@@ -173,37 +195,43 @@ final class RideFlowViewModel: ObservableObject {
     }
     
     private func calculateEstimatedArrival() {
-        guard let driver = assignedDriver else { return }
+        guard let driver = assignedDriver, driver.estimatedArrival > 0 else {
+            estimatedArrivalTime = ""
+            return
+        }
         
         let minutes = Int(driver.estimatedArrival / 60)
         estimatedArrivalTime = "\(minutes) min"
     }
     
     private func startDriverLocationUpdates() {
-        guard let driver = assignedDriver else { return }
+        guard let driver = assignedDriver, driver.estimatedArrival > 0 else { return }
         
         // Simulate driver moving towards pickup
-        statusTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self.updateDriverLocation()
+                self?.updateDriverLocation()
             }
         }
         
         // Simulate driver arrival
         let arrivalTime = driver.estimatedArrival
-        DispatchQueue.main.asyncAfter(deadline: .now() + arrivalTime) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + arrivalTime) { [weak self] in
+            guard let self else { return }
+            guard self.currentStatus != .cancelled else { return }
             self.driverArrived()
         }
     }
     
     private func updateDriverLocation() {
-        guard let driver = assignedDriver else { return }
+        guard var driver = assignedDriver,
+              let currentCoordinate = driver.currentCoordinate else { return }
         
         // Move driver slightly closer to pickup
         let pickupLat = tripData.pickupCoordinate.latitude
         let pickupLon = tripData.pickupCoordinate.longitude
-        let currentLat = driver.currentLocation.latitude
-        let currentLon = driver.currentLocation.longitude
+        let currentLat = currentCoordinate.latitude
+        let currentLon = currentCoordinate.longitude
         
         let latDiff = (pickupLat - currentLat) * 0.1
         let lonDiff = (pickupLon - currentLon) * 0.1
@@ -213,44 +241,41 @@ final class RideFlowViewModel: ObservableObject {
             longitude: currentLon + lonDiff
         )
         
-        // Update driver location
-        let updatedDriver = Driver(
-            id: driver.id,
-            name: driver.name,
-            rating: driver.rating,
-            vehicleModel: driver.vehicleModel,
-            vehiclePlate: driver.vehiclePlate,
-            vehicleColor: driver.vehicleColor,
-            phoneNumber: driver.phoneNumber,
-            photoURL: driver.photoURL,
-            currentLocation: newLocation,
-            estimatedArrival: max(driver.estimatedArrival - 300, 60) // Decrease arrival time
-        )
+        driver.currentLocation = LocationData(coordinate: newLocation)
+        if driver.estimatedArrival > 60 {
+            driver.estimatedArrival = max(driver.estimatedArrival - 300, 60)
+        }
         
-        assignedDriver = updatedDriver
+        assignedDriver = driver
         calculateEstimatedArrival()
     }
     
     private func driverArrived() {
+        guard currentStatus != .cancelled else { return }
         statusTimer?.invalidate()
         currentStatus = .driverArrived
         estimatedArrivalTime = "Ha llegado"
         
         // Simulate trip start after 1-3 minutes
         let startDelay = Double.random(in: 60...180)
-        DispatchQueue.main.asyncAfter(deadline: .now() + startDelay) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + startDelay) { [weak self] in
+            guard let self else { return }
+            guard self.currentStatus == .driverArrived else { return }
             self.startTrip()
         }
     }
     
     private func startTrip() {
+        guard currentStatus != .cancelled else { return }
         currentStatus = .inProgress
         
         // Simulate trip duration based on estimated duration
         let tripDurationString = tripData.estimatedDuration
         let tripDuration = parseDuration(tripDurationString)
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + tripDuration) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + tripDuration) { [weak self] in
+            guard let self else { return }
+            guard self.currentStatus == .inProgress else { return }
             self.completeTrip()
         }
     }
@@ -262,19 +287,27 @@ final class RideFlowViewModel: ObservableObject {
     
     private func parseDuration(_ durationString: String) -> TimeInterval {
         // Parse duration string like "8 min" or "1h 5m"
-        let components = durationString.components(separatedBy: " ")
+        let pattern = "(\\d+)\\s*(h|hr|hrs|hour|hours|m|min|mins)"
+        let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+        let nsString = durationString as NSString
         var totalSeconds: TimeInterval = 0
         
-        for component in components {
-            if component.contains("min") || component.contains("m") {
-                if let minutes = Int(component.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)) {
-                    totalSeconds += TimeInterval(minutes * 60)
-                }
-            } else if component.contains("h") {
-                if let hours = Int(component.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)) {
-                    totalSeconds += TimeInterval(hours * 3600)
-                }
+        regex?.matches(in: durationString, options: [], range: NSRange(location: 0, length: nsString.length)).forEach { match in
+            let valueString = nsString.substring(with: match.range(at: 1))
+            let unit = nsString.substring(with: match.range(at: 2)).lowercased()
+            
+            guard let value = Int(valueString) else { return }
+            if unit.hasPrefix("h") {
+                totalSeconds += TimeInterval(value * 3600)
+            } else {
+                totalSeconds += TimeInterval(value * 60)
             }
+        }
+        
+        // Fallback if format is just a number
+        if totalSeconds == 0,
+           let minutes = Int(durationString.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)) {
+            totalSeconds = TimeInterval(minutes * 60)
         }
         
         return max(totalSeconds, 300) // Minimum 5 minutes for demo
