@@ -28,7 +28,7 @@ struct RideFlowView: View {
                     Spacer()
                     
                     switch viewModel.currentStatus {
-                    case .requested:
+                    case .scheduled, .requested:
                         RequestingView(tripData: viewModel.tripData)
                     case .driverAssigned, .driverEnRoute:
                         DriverEnRouteView(
@@ -52,7 +52,7 @@ struct RideFlowView: View {
                             driver: viewModel.assignedDriver!,
                             onComplete: onComplete
                         )
-                    case .cancelled:
+                    case .cancelled, .failed:
                         TripCancelledView(onComplete: onComplete)
                     }
                 }

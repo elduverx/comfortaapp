@@ -237,8 +237,7 @@ struct Step3ConfirmationView: View {
         defer { isLoadingPricing = false }
         
         do {
-            let pricingService = PricingService()
-            pricing = try await pricingService.calculatePricing(
+            pricing = try await PricingService.shared.calculatePricing(
                 origin: viewModel.lugarRecogida,
                 destination: viewModel.destino
             )

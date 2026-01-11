@@ -43,7 +43,7 @@ struct RideBookingView: View {
             }
         }
         .sheet(isPresented: $showingSettings) {
-            SettingsView(onLogout: onLogout)
+            RideBookingSettingsView(onLogout: onLogout)
         }
         .onAppear {
             viewModel.requestCurrentLocation()
@@ -155,8 +155,8 @@ struct RideBookingView: View {
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.ultraThinMaterial)
+            Color.clear
+                .ultraLiquidGlass(cornerRadius: 24, intensity: 0.95)
                 .ignoresSafeArea(edges: .bottom)
         )
         .animation(.easeInOut(duration: 0.3), value: viewModel.activeField != nil)
@@ -227,7 +227,7 @@ private struct BookRideButton: View {
     }
 }
 
-private struct SettingsView: View {
+private struct RideBookingSettingsView: View {
     let onLogout: () -> Void
     @Environment(\.dismiss) private var dismiss
     

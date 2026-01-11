@@ -50,16 +50,16 @@ extension CLLocationDistance {
     }
 }
 
-extension TimeInterval {
+public extension TimeInterval {
     var formattedDuration: String {
         let minutes = Int(self / 60)
         let hours = minutes / 60
         let remainingMinutes = minutes % 60
         
         if hours > 0 {
-            return "\(hours)h \(remainingMinutes)min"
+            return "\(hours)h \(remainingMinutes)m"
         } else {
-            return "\(minutes)min"
+            return "\(remainingMinutes)m"
         }
     }
 }

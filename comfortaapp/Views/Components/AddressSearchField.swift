@@ -122,11 +122,15 @@ class SearchCompleter: NSObject, ObservableObject, MKLocalSearchCompleterDelegat
     // MARK: - MKLocalSearchCompleterDelegate
     
     func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
-        results = completer.results
+        DispatchQueue.main.async { [weak self] in
+            self?.results = completer.results
+        }
     }
     
     func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
         print("Error en autocompletado: \(error)")
-        results = []
+        DispatchQueue.main.async { [weak self] in
+            self?.results = []
+        }
     }
 }

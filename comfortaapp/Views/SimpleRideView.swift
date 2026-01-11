@@ -330,19 +330,18 @@ struct SimpleRideView: View {
         }
         .padding(20)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 6)
+            Color.clear
+                .ultraLiquidGlass(cornerRadius: 16, intensity: 0.9)
         )
     }
     
     // MARK: - Map Components
     
-    private var mapAnnotations: [MapAnnotationItem] {
-        var annotations: [MapAnnotationItem] = []
+    private var mapAnnotations: [SimpleMapAnnotationItem] {
+        var annotations: [SimpleMapAnnotationItem] = []
         
         if let pickup = viewModel.pickupCoordinate {
-            annotations.append(MapAnnotationItem(
+            annotations.append(SimpleMapAnnotationItem(
                 coordinate: pickup,
                 type: .pickup,
                 title: "Recogida"
@@ -350,7 +349,7 @@ struct SimpleRideView: View {
         }
         
         if let destination = viewModel.destinationCoordinate {
-            annotations.append(MapAnnotationItem(
+            annotations.append(SimpleMapAnnotationItem(
                 coordinate: destination,
                 type: .destination,
                 title: "Destino"
@@ -363,20 +362,20 @@ struct SimpleRideView: View {
 
 // MARK: - Map Annotation Item
 
-private struct MapAnnotationItem: Identifiable {
+private struct SimpleMapAnnotationItem: Identifiable {
     let id = UUID()
     let coordinate: CLLocationCoordinate2D
-    let type: MapPinType
+    let type: SimpleMapPinType
     let title: String
 }
 
-private enum MapPinType {
+private enum SimpleMapPinType {
     case pickup
     case destination
 }
 
 private struct MapPinView: View {
-    let type: MapPinType
+    let type: SimpleMapPinType
     let title: String
     
     var body: some View {

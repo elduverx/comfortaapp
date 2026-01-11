@@ -11,18 +11,25 @@ public final class TripCalculationService {
     public init() {}
     
     public func calculateTrip(from pickup: LocationPoint, to destination: LocationPoint) async throws -> Trip {
-        let distance = calculateDistance(from: pickup.coordinate, to: destination.coordinate)
-        let fare = calculateFare(for: distance)
+        let distanceMeters = calculateDistance(from: pickup.coordinate, to: destination.coordinate)
+        let fare = calculateFare(for: distanceMeters)
         let duration = try await estimateRouteTime(from: pickup, to: destination)
         
+        let pickupInfo = LocationInfo(address: pickup.address, coordinate: pickup.coordinate)
+        let destinationInfo = LocationInfo(address: destination.address, coordinate: destination.coordinate)
+        let payment = PaymentMethodInfo(type: .cash, currency: "EUR", displayName: "Efectivo", isDefault: true)
+        
         return Trip(
-            pickup: pickup,
-            destination: destination,
-            distance: distance,
+            userId: UserManager.shared.currentUser?.id ?? "",
+            pickupLocation: pickupInfo,
+            destinationLocation: destinationInfo,
             estimatedFare: fare,
+            estimatedDistance: distanceMeters / 1000,
             estimatedDuration: duration,
-            status: .planning,
-            createdAt: Date()
+            vehicleType: VehicleType.sedan.rawValue,
+            paymentMethod: payment,
+            specialRequests: [],
+            scheduledAt: nil
         )
     }
     

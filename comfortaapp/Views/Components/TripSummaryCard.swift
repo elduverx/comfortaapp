@@ -22,14 +22,14 @@ struct TripSummaryCard: View {
                     TripDetailsRow(
                         icon: "mappin.circle.fill",
                         title: "Recogida",
-                        subtitle: trip.pickup.address,
+                        subtitle: trip.pickupLocation.address,
                         iconColor: .green
                     )
                     
                     TripDetailsRow(
                         icon: "flag.checkered",
                         title: "Destino",
-                        subtitle: trip.destination.address,
+                        subtitle: trip.destinationLocation.address,
                         iconColor: .accentColor
                     )
                     
@@ -149,26 +149,31 @@ private struct TripMetric: View {
 
 struct TripSummaryCard_Previews: PreviewProvider {
     static var previews: some View {
-        let samplePickup = LocationPoint(
-            coordinate: CLLocationCoordinate2D(latitude: 40.4168, longitude: -3.7038),
+        let samplePickup = LocationInfo(
             address: "Plaza Mayor, Madrid, España",
-            name: "Plaza Mayor"
+            coordinate: CLLocationCoordinate2D(latitude: 40.4168, longitude: -3.7038)
         )
         
-        let sampleDestination = LocationPoint(
-            coordinate: CLLocationCoordinate2D(latitude: 40.3838, longitude: -3.7186),
+        let sampleDestination = LocationInfo(
             address: "Aeropuerto Madrid-Barajas, Madrid, España",
-            name: "Aeropuerto"
+            coordinate: CLLocationCoordinate2D(latitude: 40.3838, longitude: -3.7186)
+        )
+        
+        let samplePayment = PaymentMethodInfo(
+            type: .cash,
+            displayName: "Efectivo",
+            isDefault: true
         )
         
         let sampleTrip = Trip(
-            pickup: samplePickup,
-            destination: sampleDestination,
-            distance: 15420,
+            userId: "user123",
+            pickupLocation: samplePickup,
+            destinationLocation: sampleDestination,
             estimatedFare: 23.13,
+            estimatedDistance: 15.42,
             estimatedDuration: 1800,
-            status: .planning,
-            createdAt: Date()
+            vehicleType: "Standard",
+            paymentMethod: samplePayment
         )
         
         VStack(spacing: 20) {

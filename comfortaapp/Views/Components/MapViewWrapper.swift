@@ -27,19 +27,19 @@ struct MapViewWrapper: View {
         }
     }
     
-    private var annotations: [MapAnnotationItem] {
+    private var annotations: [WrapperMapAnnotationItem] {
         guard let trip = trip else { return [] }
         
         return [
-            MapAnnotationItem(
-                coordinate: trip.pickup.coordinate,
+            WrapperMapAnnotationItem(
+                coordinate: trip.pickupLocation.coordinate.clLocationCoordinate,
                 type: .pickup,
-                title: trip.pickup.name ?? "Recogida"
+                title: trip.pickupLocation.address
             ),
-            MapAnnotationItem(
-                coordinate: trip.destination.coordinate,
+            WrapperMapAnnotationItem(
+                coordinate: trip.destinationLocation.coordinate.clLocationCoordinate,
                 type: .destination,
-                title: trip.destination.name ?? "Destino"
+                title: trip.destinationLocation.address
             )
         ]
     }
@@ -54,7 +54,7 @@ struct MapViewWrapper: View {
         }
         
         // Calculate region to show both pickup and destination
-        let coordinates = [trip.pickup.coordinate, trip.destination.coordinate]
+        let coordinates = [trip.pickupLocation.coordinate.clLocationCoordinate, trip.destinationLocation.coordinate.clLocationCoordinate]
         let rect = coordinates.reduce(MKMapRect.null) { rect, coordinate in
             let point = MKMapPoint(coordinate)
             let pointRect = MKMapRect(
@@ -70,7 +70,7 @@ struct MapViewWrapper: View {
     }
 }
 
-private struct MapAnnotationItem: Identifiable {
+private struct WrapperMapAnnotationItem: Identifiable {
     let id = UUID()
     let coordinate: CLLocationCoordinate2D
     let type: AnnotationType
@@ -129,26 +129,31 @@ private struct AnnotationView: View {
 
 struct MapViewWrapper_Previews: PreviewProvider {
     static var previews: some View {
-        let samplePickup = LocationPoint(
-            coordinate: CLLocationCoordinate2D(latitude: 40.4168, longitude: -3.7038),
+        let samplePickup = LocationInfo(
             address: "Plaza Mayor, Madrid, España",
-            name: "Plaza Mayor"
+            coordinate: CLLocationCoordinate2D(latitude: 40.4168, longitude: -3.7038)
         )
         
-        let sampleDestination = LocationPoint(
-            coordinate: CLLocationCoordinate2D(latitude: 40.3838, longitude: -3.7186),
+        let sampleDestination = LocationInfo(
             address: "Aeropuerto Madrid-Barajas, Madrid, España",
-            name: "Aeropuerto"
+            coordinate: CLLocationCoordinate2D(latitude: 40.3838, longitude: -3.7186)
+        )
+        
+        let samplePayment = PaymentMethodInfo(
+            type: .cash,
+            displayName: "Efectivo",
+            isDefault: true
         )
         
         let sampleTrip = Trip(
-            pickup: samplePickup,
-            destination: sampleDestination,
-            distance: 15420,
+            userId: "user123",
+            pickupLocation: samplePickup,
+            destinationLocation: sampleDestination,
             estimatedFare: 23.13,
+            estimatedDistance: 15.42,
             estimatedDuration: 1800,
-            status: .planning,
-            createdAt: Date()
+            vehicleType: "Standard",
+            paymentMethod: samplePayment
         )
         
         MapViewWrapper(

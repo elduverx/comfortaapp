@@ -6,17 +6,17 @@ import CoreLocation
 struct DriverEnRouteView: View {
     let tripData: TripData
     let driver: Driver
-    let status: RideStatus
+    let status: TripStatus
     
     var body: some View {
         VStack(spacing: 20) {
             // Status Header
             HStack {
-                Image(systemName: status.icon)
+                Image(systemName: status.iconName)
                     .foregroundColor(Color(status.color))
                     .font(.title2)
                 
-                Text(status.rawValue)
+                Text(status.displayName)
                     .font(.title2.bold())
                 
                 Spacer()

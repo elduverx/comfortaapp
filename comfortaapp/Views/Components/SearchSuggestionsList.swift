@@ -23,8 +23,9 @@ struct SearchSuggestionsList: View {
                 } else {
                     LazyVStack(spacing: 0) {
                         ForEach(suggestions.prefix(5)) { suggestion in
-                            SuggestionRow(
+                            SearchSuggestionRow(
                                 suggestion: suggestion,
+                                isLast: suggestion == suggestions.prefix(5).last,
                                 onTap: { onSuggestionSelected(suggestion) }
                             )
                         }
@@ -42,8 +43,9 @@ struct SearchSuggestionsList: View {
     }
 }
 
-private struct SuggestionRow: View {
+private struct SearchSuggestionRow: View {
     let suggestion: SearchSuggestion
+    let isLast: Bool
     let onTap: () -> Void
     
     var body: some View {
