@@ -8,7 +8,7 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             tabContainer(title: "Mapa", hidesNavigationBar: true) {
-                ModernRideView(
+                ProfessionalRideView(
                     userName: userName,
                     onLogout: onLogout
                 )
