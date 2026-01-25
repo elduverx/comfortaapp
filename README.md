@@ -204,3 +204,4 @@ Propietario - Comforta © 2026
 Para soporte técnico o consultas:
 - Email: soporte@comforta.app
 - Web: https://comforta.app
+# comfortaapp
