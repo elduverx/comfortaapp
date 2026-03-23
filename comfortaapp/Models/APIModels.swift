@@ -39,6 +39,31 @@ struct LogoutRequest: Codable {
     let deviceToken: String?
 }
 
+struct DeviceTokenRequest: Codable {
+    let userId: String
+    let deviceToken: String
+    let platform: String
+    let appVersion: String
+    let deviceModel: String
+    let osVersion: String
+    let timestamp: Double
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case deviceToken = "device_token"
+        case platform
+        case appVersion = "app_version"
+        case deviceModel = "device_model"
+        case osVersion = "os_version"
+        case timestamp
+    }
+}
+
+struct DeviceTokenResponse: Codable {
+    let success: Bool
+    let message: String?
+}
+
 // MARK: - User Models
 
 struct APIUser: Codable {
@@ -88,6 +113,10 @@ struct CreateTripRequest: Codable {
     let distanciaKm: Double?
     let precioBase: Double?
     let precioTotal: Double?
+    let pickupLat: Double?
+    let pickupLng: Double?
+    let destinationLat: Double?
+    let destinationLng: Double?
 }
 
 struct TripResponse: Codable {
@@ -118,6 +147,10 @@ struct APITrip: Codable, Identifiable {
     let precioTotal: Double?
     let estado: String
     let pagado: Bool
+    let pickupLat: Double?
+    let pickupLng: Double?
+    let destinationLat: Double?
+    let destinationLng: Double?
     let numeroFactura: String?
     let paymentOrderId: String?
     let paymentAuthCode: String?
@@ -126,13 +159,15 @@ struct APITrip: Codable, Identifiable {
     let paymentResponse: String?
     let notas: String?
     let notasAdmin: String?
+    let conductorId: String?
+    let conductorNombre: String?
     let createdAt: String
     let updatedAt: String?
 
     // Helper to convert to Trip model
     func toTrip() -> Trip? {
-        guard let pickupLocation = createLocationInfo(from: lugarRecogida),
-              let destinationLocation = createLocationInfo(from: destino),
+        guard let pickupLocation = createLocationInfo(from: lugarRecogida, latitude: pickupLat, longitude: pickupLng),
+              let destinationLocation = createLocationInfo(from: destino, latitude: destinationLat, longitude: destinationLng),
               let startDate = ISO8601DateFormatter().date(from: fechaInicio) else {
             return nil
         }
@@ -153,11 +188,17 @@ struct APITrip: Codable, Identifiable {
         )
     }
 
-    private func createLocationInfo(from address: String?) -> LocationInfo? {
+    private func createLocationInfo(from address: String?, latitude: Double?, longitude: Double?) -> LocationInfo? {
         guard let address = address else { return nil }
+        let coordinate: CLLocationCoordinate2D
+        if let latitude = latitude, let longitude = longitude {
+            coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        } else {
+            coordinate = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        }
         return LocationInfo(
             address: address,
-            coordinate: CLLocationCoordinate2D(latitude: 0, longitude: 0)
+            coordinate: coordinate
         )
     }
 }

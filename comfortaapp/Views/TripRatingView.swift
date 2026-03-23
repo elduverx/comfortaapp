@@ -4,6 +4,7 @@ import CoreLocation
 struct TripRatingView: View {
     let trip: Trip
     let onSubmit: (Double, String?) -> Void
+    let onRequestAnotherTrip: () -> Void
     let onSkip: () -> Void
     
     @State private var rating: Double = 0
@@ -24,7 +25,7 @@ struct TripRatingView: View {
                 LinearGradient(
                     colors: [
                         ComfortaDesign.Colors.background,
-                        .black.opacity(0.8),
+                        ComfortaDesign.Colors.surface.opacity(0.92),
                         ComfortaDesign.Colors.background
                     ],
                     startPoint: .topLeading,
@@ -250,13 +251,24 @@ struct TripRatingView: View {
             
             Spacer()
             
-            LiquidButton(
-                "Continuar",
-                icon: "arrow.right",
-                style: .primary,
-                size: .large
-            ) {
-                onSkip()
+            VStack(spacing: ComfortaDesign.Spacing.sm) {
+                LiquidButton(
+                    "Solicitar otro viaje",
+                    icon: "plus.circle.fill",
+                    style: .primary,
+                    size: .large
+                ) {
+                    onRequestAnotherTrip()
+                }
+
+                LiquidButton(
+                    "Cerrar",
+                    icon: "xmark",
+                    style: .secondary,
+                    size: .large
+                ) {
+                    onSkip()
+                }
             }
             .padding(.horizontal, ComfortaDesign.Spacing.lg)
             
@@ -377,6 +389,9 @@ struct TagChip: View {
         ),
         onSubmit: { rating, feedback in
             print("Rating: \(rating), Feedback: \(feedback ?? "None")")
+        },
+        onRequestAnotherTrip: {
+            print("Request another trip")
         },
         onSkip: {
             print("Rating skipped")

@@ -12,35 +12,91 @@ struct ProfessionalRideView: View {
     @State private var showingTripConfirmation = false
     @State private var hasTrackedHome = false
     @State private var mapZoomLevel: Double = 0.05
+    @State private var isMapSelectionMode = false
+    @State private var tempSelectedLocation: CLLocationCoordinate2D?
+    @State private var tempSelectedAddress: String?
+    @State private var isLoadingAddress = false
 
     let userName: String
     let onLogout: () -> Void
+    let onProfileTap: () -> Void
 
-    init(userName: String, onLogout: @escaping () -> Void) {
+    init(
+        userName: String,
+        onLogout: @escaping () -> Void,
+        onProfileTap: @escaping () -> Void
+    ) {
         self.userName = userName
         self.onLogout = onLogout
+        self.onProfileTap = onProfileTap
     }
 
     var body: some View {
         ZStack {
-            // Full Screen Map
-            mapView
+            // Full Screen Map with MapReader for tap detection
+            if isMapSelectionMode {
+                mapViewWithTapDetection
+                    .ignoresSafeArea()
+            } else {
+                mapView
+                    .ignoresSafeArea()
+            }
+
+            // Map Selection Mode Overlay
+            if isMapSelectionMode {
+                mapSelectionOverlay
+            }
 
             // Floating Controls Overlay
-            floatingControls
+            if !isMapSelectionMode {
+                floatingControls
+            }
 
             // Bottom Sheet with Search and Details
-            BottomSheet(position: $bottomSheetPosition, backgroundColor: ComfortaDesign.Colors.surface) {
-                bottomSheetContent
+            if !isMapSelectionMode {
+                BottomSheet(position: $bottomSheetPosition, backgroundColor: ComfortaDesign.Colors.surface) {
+                    bottomSheetContent
+                }
+            }
+
+            // Confirmation panel when address is loaded
+            if isMapSelectionMode, let address = tempSelectedAddress, !isLoadingAddress {
+                confirmationPanel(address: address)
+            }
+
+            // Loading indicator
+            if isLoadingAddress {
+                loadingIndicator
             }
         }
-        .ignoresSafeArea(.all, edges: .all)
         .onAppear {
             if !hasTrackedHome {
                 AnalyticsService.shared.track(.viewHome)
                 hasTrackedHome = true
             }
             viewModel.useCurrentLocation()
+            viewModel.refreshTripStatusIfNeeded()
+            viewModel.resumeTripMonitoringIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showActiveTrip)) { notification in
+            guard let tripId = notification.userInfo?["trip_id"] as? String else { return }
+            handleTripNotification(tripId: tripId)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showTripDetails)) { notification in
+            guard let tripId = notification.userInfo?["trip_id"] as? String else { return }
+            handleTripNotification(tripId: tripId)
+        }
+        .onChange(of: viewModel.currentTripState) { _, newValue in
+            switch newValue {
+            case .confirmingTrip, .processingPayment, .findingDriver, .driverAssigned, .driverEnRoute, .driverArrived, .inProgress:
+                if bottomSheetPosition == .peek {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                        bottomSheetPosition = .middle
+                    }
+                }
+            default:
+                break
+            }
         }
         .sheet(isPresented: $showingTripConfirmation) {
             if let trip = viewModel.currentTrip {
@@ -58,29 +114,104 @@ struct ProfessionalRideView: View {
         }
     }
 
+    private func handleTripNotification(tripId: String) {
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+            bottomSheetPosition = .middle
+        }
+        isMapSelectionMode = false
+        viewModel.handleTripNotification(tripId: tripId)
+    }
+
     // MARK: - Map View
 
     private var mapView: some View {
-        Map(
-            coordinateRegion: $viewModel.mapRegion,
-            showsUserLocation: true,
-            annotationItems: mapAnnotations
-        ) { annotation in
-            MapAnnotation(coordinate: annotation.coordinate) {
-                ModernMapPin(type: annotation.type, title: annotation.title)
-            }
-        }
-        .overlay(routeOverlay)
+        RouteMapView(
+            region: $viewModel.mapRegion,
+            annotations: mapAnnotations.map {
+                RouteMapAnnotation(
+                    coordinate: $0.coordinate,
+                    title: $0.title,
+                    tint: markerTint(for: $0.type)
+                )
+            },
+            route: viewModel.routePolyline,
+            showsUserLocation: shouldShowUserLocation
+        )
         .onTapGesture {
             hideKeyboard()
         }
     }
 
-    @ViewBuilder
-    private var routeOverlay: some View {
-        if let polyline = viewModel.routePolyline {
-            RouteOverlayView(polyline: polyline, region: viewModel.mapRegion)
+    private var mapViewWithTapDetection: some View {
+        MapReader { proxy in
+            Map(position: .constant(.region(viewModel.mapRegion))) {
+                // Pin de recogida
+                if let pickup = viewModel.pickupCoordinate {
+                    Annotation("Recogida", coordinate: pickup) {
+                        ZStack {
+                            Circle()
+                                .fill(.green)
+                                .frame(width: 40, height: 40)
+                                .shadow(radius: 4)
+
+                            Image(systemName: "figure.walk.circle.fill")
+                                .foregroundStyle(.white)
+                                .font(.system(size: 20))
+                        }
+                    }
+                }
+
+                // Pin temporal durante selección
+                if let tempLoc = tempSelectedLocation {
+                    Annotation("Seleccionado", coordinate: tempLoc) {
+                        ZStack {
+                            Circle()
+                                .fill(.blue)
+                                .frame(width: 44, height: 44)
+                                .shadow(color: .blue.opacity(0.5), radius: 8)
+
+                            Circle()
+                                .fill(.white)
+                                .frame(width: 36, height: 36)
+
+                            Image(systemName: "mappin.circle.fill")
+                                .foregroundStyle(.blue)
+                                .font(.system(size: 20))
+                        }
+                        .scaleEffect(isLoadingAddress ? 1.1 : 1.0)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.6).repeatForever(), value: isLoadingAddress)
+                    }
+                }
+
+                // Ruta si existe
+                if let route = viewModel.routePolyline {
+                    MapPolyline(route)
+                        .stroke(.blue, lineWidth: 5)
+                }
+            }
+            .mapStyle(.standard(elevation: .realistic))
+            .mapControls {
+                MapCompass()
+                MapScaleView()
+                MapUserLocationButton()
+            }
+            .onTapGesture { screenPosition in
+                if let coordinate = proxy.convert(screenPosition, from: .local) {
+                    handleMapTapAtCoordinate(coordinate)
+                }
+            }
         }
+    }
+
+    private func markerTint(for type: MapPinType) -> Color {
+        switch type {
+        case .pickup, .destination:
+            return ComfortaDesign.Colors.primaryGreen
+        }
+    }
+
+    private var shouldShowUserLocation: Bool {
+        mapAnnotations.isEmpty
     }
 
     // MARK: - Floating Controls
@@ -90,7 +221,7 @@ struct ProfessionalRideView: View {
             // Top Bar
             topBar
                 .padding(.horizontal, 16)
-                .padding(.top, 50)
+                .padding(.top, 12)
 
             Spacer()
 
@@ -122,7 +253,7 @@ struct ProfessionalRideView: View {
         HStack(spacing: 12) {
             // Menu/Profile Button
             ProfileButton(userName: userName) {
-                onLogout()
+                onProfileTap()
             }
 
             // Compact Search (when bottom sheet is collapsed)
@@ -149,7 +280,9 @@ struct ProfessionalRideView: View {
             searchContent
         case .readyToConfirm:
             tripSummaryContent
-        case .driverAssigned, .driverEnRoute, .driverArrived, .inProgress:
+        case .confirmingTrip, .processingPayment, .findingDriver:
+            pendingTripContent
+        case .driverAssigned, .driverEnRoute, .driverArrived, .inProgress, .completed:
             activeTripContent
         default:
             searchContent
@@ -169,27 +302,41 @@ struct ProfessionalRideView: View {
 
             // Search Fields
             VStack(spacing: 12) {
-                searchField(
+                LiquidSearchField(
                     text: $viewModel.pickupText,
+                    selectedAddress: Binding(
+                        get: { viewModel.pickupText },
+                        set: { _ in }
+                    ),
                     placeholder: "Ubicación actual",
-                    icon: "circle.fill",
-                    iconColor: ComfortaDesign.Colors.primaryGreen,
+                    icon: "location.fill",
                     onCurrentLocation: {
                         viewModel.useCurrentLocation()
+                    },
+                    onSelection: { address, coordinate in
+                        viewModel.setPickup(address: address, coordinate: coordinate)
                     }
                 )
 
-                Divider()
-                    .padding(.leading, 52)
-
-                searchField(
+                LiquidSearchField(
                     text: $viewModel.destinationText,
+                    selectedAddress: Binding(
+                        get: { viewModel.destinationText },
+                        set: { _ in }
+                    ),
                     placeholder: "¿A dónde vas?",
                     icon: "mappin.circle.fill",
-                    iconColor: ComfortaDesign.Colors.error,
+                    onMapSelection: {
+                        enterMapSelectionMode()
+                    },
                     onSelection: { address, coordinate in
                         viewModel.setDestination(address: address, coordinate: coordinate)
                         bottomSheetPosition = .middle
+                    },
+                    onFocusChange: { focused in
+                        if focused {
+                            bottomSheetPosition = .full
+                        }
                     }
                 )
             }
@@ -200,6 +347,10 @@ struct ProfessionalRideView: View {
                     .fill(ComfortaDesign.Colors.surfaceSecondary)
             )
             .padding(.horizontal, 20)
+
+            scheduleSelector
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
 
             // Quick Actions
             if !quickDestinations.isEmpty {
@@ -259,6 +410,8 @@ struct ProfessionalRideView: View {
                 Divider()
                     .background(ComfortaDesign.Colors.glassBorder)
 
+                serviceTimeRow
+
                 // Trip Stats
                 HStack(spacing: 20) {
                     tripStatItem(
@@ -282,7 +435,7 @@ struct ProfessionalRideView: View {
                     tripStatItem(
                         icon: "eurosign.circle",
                         label: "Precio",
-                        value: viewModel.estimatedFare
+                        value: viewModel.summaryFareText
                     )
                 }
                 .padding(.vertical, 12)
@@ -301,10 +454,114 @@ struct ProfessionalRideView: View {
                 style: .primary,
                 size: .large
             ) {
-                viewModel.confirmTrip()
+                // Create a preview trip for confirmation
+                viewModel.createPreviewTrip()
                 showingTripConfirmation = true
             }
             .padding(.horizontal, 20)
+
+            Spacer()
+        }
+    }
+
+    private var scheduleSelector: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar.badge.clock")
+                    .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+                Text("Hora del servicio")
+                    .font(ComfortaDesign.Typography.body1)
+                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
+            }
+
+            DatePicker(
+                "Fecha y hora del servicio",
+                selection: $viewModel.requestedServiceDate,
+                in: Date()...,
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .datePickerStyle(.compact)
+            .tint(ComfortaDesign.Colors.primaryGreen)
+
+            Text("Tu conductor estará allí a la hora solicitada.")
+                .font(ComfortaDesign.Typography.caption1)
+                .foregroundColor(ComfortaDesign.Colors.textSecondary)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(ComfortaDesign.Colors.surfaceSecondary)
+        )
+    }
+
+    private var pendingTripContent: some View {
+        let copy = pendingCopy(for: viewModel.currentTripState)
+
+        return VStack(spacing: 20) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(ComfortaDesign.Colors.primaryGreen.opacity(0.2))
+                        .frame(width: 44, height: 44)
+
+                    Image(systemName: pendingIconName(for: viewModel.currentTripState))
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(copy.title)
+                        .font(ComfortaDesign.Typography.title3)
+                        .foregroundColor(ComfortaDesign.Colors.textPrimary)
+
+                    Text(copy.subtitle)
+                        .font(ComfortaDesign.Typography.body2)
+                        .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                }
+
+                Spacer()
+
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(ComfortaDesign.Colors.primaryGreen)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(ComfortaDesign.Colors.surfaceSecondary)
+            )
+            .padding(.horizontal, 20)
+
+            VStack(spacing: 16) {
+                routeInfoRow(
+                    from: viewModel.pickupText.isEmpty ? "Recogida" : viewModel.pickupText,
+                    to: viewModel.destinationText.isEmpty ? "Destino" : viewModel.destinationText
+                )
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(ComfortaDesign.Colors.surfaceSecondary)
+                )
+
+                tripDetailsCard
+
+                VStack(spacing: 12) {
+                    ForEach(pendingSteps(for: viewModel.currentTripState)) { step in
+                        pendingStepRow(step)
+                    }
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(ComfortaDesign.Colors.surfaceSecondary)
+                )
+            }
+            .padding(.horizontal, 20)
+
+            Text("Tu conductor estará allí a la hora solicitada.")
+                .font(ComfortaDesign.Typography.caption1)
+                .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                .padding(.horizontal, 20)
 
             Spacer()
         }
@@ -327,58 +584,61 @@ struct ProfessionalRideView: View {
             TripStatusIndicator(state: viewModel.currentTripState)
                 .padding(.horizontal, 20)
 
+            tripDetailsCard
+                .padding(.horizontal, 20)
+
             Spacer()
         }
     }
 
     private var recentTripsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Recientes")
-                .font(ComfortaDesign.Typography.body1)
-                .foregroundColor(ComfortaDesign.Colors.textSecondary)
-                .padding(.horizontal, 20)
+            if !viewModel.recentDestinations.isEmpty {
+                Text("Recientes")
+                    .font(ComfortaDesign.Typography.body1)
+                    .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                    .padding(.horizontal, 20)
 
-            ForEach(0..<3, id: \.self) { _ in
-                RecentTripRow(
-                    title: "Casa",
-                    subtitle: "Av. del Puerto 22, Valencia",
-                    icon: "house.fill"
-                ) {
-                    // Select recent trip
+                ForEach(viewModel.recentDestinations) { destination in
+                    RecentTripRow(
+                        title: destination.title,
+                        subtitle: destination.subtitle,
+                        icon: getIconForDestination(destination.title)
+                    ) {
+                        selectRecentDestination(destination)
+                    }
                 }
             }
         }
+    }
+
+    private func getIconForDestination(_ title: String) -> String {
+        let lowercased = title.lowercased()
+        if lowercased.contains("casa") || lowercased.contains("home") {
+            return "house.fill"
+        } else if lowercased.contains("trabajo") || lowercased.contains("office") || lowercased.contains("oficina") {
+            return "building.2.fill"
+        } else if lowercased.contains("aeropuerto") || lowercased.contains("airport") {
+            return "airplane"
+        } else if lowercased.contains("hotel") {
+            return "bed.double.fill"
+        } else if lowercased.contains("restaurante") || lowercased.contains("restaurant") {
+            return "fork.knife"
+        } else {
+            return "mappin.circle.fill"
+        }
+    }
+
+    private func selectRecentDestination(_ destination: QuickDestination) {
+        viewModel.setDestination(address: destination.subtitle, coordinate: destination.coordinate)
+        if viewModel.pickupCoordinate == nil {
+            viewModel.useCurrentLocation()
+        }
+        viewModel.calculateFare()
+        bottomSheetPosition = .middle
     }
 
     // MARK: - Helper Views
-
-    private func searchField(
-        text: Binding<String>,
-        placeholder: String,
-        icon: String,
-        iconColor: Color,
-        onCurrentLocation: (() -> Void)? = nil,
-        onSelection: ((String, CLLocationCoordinate2D) -> Void)? = nil
-    ) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(iconColor)
-                .frame(width: 20)
-
-            TextField(placeholder, text: text)
-                .font(ComfortaDesign.Typography.body1)
-                .foregroundColor(ComfortaDesign.Colors.textPrimary)
-
-            if let onCurrentLocation = onCurrentLocation, text.wrappedValue.isEmpty {
-                Button(action: onCurrentLocation) {
-                    Image(systemName: "location.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(ComfortaDesign.Colors.primaryGreen)
-                }
-            }
-        }
-    }
 
     private func routeInfoRow(from: String, to: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
@@ -406,6 +666,24 @@ struct ProfessionalRideView: View {
                     .font(ComfortaDesign.Typography.body1)
                     .foregroundColor(ComfortaDesign.Colors.textPrimary)
                     .fontWeight(.medium)
+            }
+
+            Spacer()
+        }
+    }
+
+    private var serviceTimeRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock.fill")
+                .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Hora del servicio")
+                    .font(ComfortaDesign.Typography.caption1)
+                    .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                Text(formattedServiceTime(for: viewModel.currentTrip?.scheduledAt ?? viewModel.requestedServiceDate))
+                    .font(ComfortaDesign.Typography.body1)
+                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
             }
 
             Spacer()
@@ -644,12 +922,26 @@ struct TripStatusIndicator: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ProgressView()
-                .progressViewStyle(CircularProgressViewStyle(tint: ComfortaDesign.Colors.primaryGreen))
+            if isLoadingState {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: ComfortaDesign.Colors.primaryGreen))
+            } else {
+                Image(systemName: statusIconName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(statusTint)
+            }
 
-            Text(state.displayName)
-                .font(ComfortaDesign.Typography.body1)
-                .foregroundColor(ComfortaDesign.Colors.textPrimary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(state.displayName)
+                    .font(ComfortaDesign.Typography.body1)
+                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
+
+                if let detail = statusDetailText {
+                    Text(detail)
+                        .font(ComfortaDesign.Typography.caption1)
+                        .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                }
+            }
 
             Spacer()
         }
@@ -657,7 +949,478 @@ struct TripStatusIndicator: View {
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(ComfortaDesign.Colors.surfaceSecondary)
+            )
+    }
+
+    private var isLoadingState: Bool {
+        switch state {
+        case .confirmingTrip, .processingPayment, .findingDriver:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var statusIconName: String {
+        switch state {
+        case .driverAssigned:
+            return "person.crop.circle.fill"
+        case .driverEnRoute:
+            return "car.fill"
+        case .driverArrived:
+            return "location.circle.fill"
+        case .inProgress:
+            return "car.circle.fill"
+        case .completed:
+            return "checkmark.circle.fill"
+        case .cancelled:
+            return "xmark.circle.fill"
+        default:
+            return "clock.fill"
+        }
+    }
+
+    private var statusTint: Color {
+        switch state {
+        case .driverAssigned, .driverEnRoute, .driverArrived, .inProgress:
+            return ComfortaDesign.Colors.primaryGreen
+        case .completed:
+            return ComfortaDesign.Colors.success
+        case .cancelled:
+            return ComfortaDesign.Colors.error
+        default:
+            return ComfortaDesign.Colors.textSecondary
+        }
+    }
+
+    private var statusDetailText: String? {
+        switch state {
+        case .driverAssigned:
+            return "Puedes contactar al conductor si lo necesitas."
+        case .driverEnRoute:
+            return "El conductor va en camino a tu recogida."
+        case .driverArrived:
+            return "Tu conductor ya está en el punto."
+        case .inProgress:
+            return "Disfruta el viaje. Te avisaremos al llegar."
+        case .completed:
+            return "Gracias por viajar con Comforta."
+        case .cancelled:
+            return "El viaje fue cancelado."
+        default:
+            return nil
+        }
+    }
+}
+
+private enum PendingStepStatus {
+    case done
+    case active
+    case pending
+}
+
+private struct PendingStep: Identifiable {
+    let id = UUID()
+    let title: String
+    let subtitle: String
+    let status: PendingStepStatus
+}
+
+private struct TripDetailMetric: Identifiable {
+    let id = UUID()
+    let title: String
+    let value: String
+}
+
+private extension ProfessionalRideView {
+    func pendingCopy(for state: TripState) -> (title: String, subtitle: String) {
+        switch state {
+        case .confirmingTrip:
+            return ("Buscando conductor", "Estamos confirmando tu solicitud.")
+        case .processingPayment:
+            return ("Buscando conductor", "Estamos localizando al conductor más cercano.")
+        case .findingDriver:
+            return ("Buscando conductor", "Te avisaremos en cuanto esté asignado.")
+        default:
+            return ("Procesando", "Actualizando el estado de tu viaje.")
+        }
+    }
+
+    func pendingIconName(for state: TripState) -> String {
+        switch state {
+        case .confirmingTrip:
+            return "paperplane.fill"
+        case .processingPayment:
+            return "checkmark.seal.fill"
+        case .findingDriver:
+            return "person.2.fill"
+        default:
+            return "clock.fill"
+        }
+    }
+
+    func pendingSteps(for state: TripState) -> [PendingStep] {
+        let statuses: [PendingStepStatus]
+
+        switch state {
+        case .confirmingTrip:
+            statuses = [.active, .pending, .pending]
+        case .processingPayment:
+            statuses = [.done, .active, .pending]
+        case .findingDriver:
+            statuses = [.done, .active, .pending]
+        default:
+            statuses = [.pending, .pending, .pending]
+        }
+
+        return [
+            PendingStep(
+                title: "Solicitud enviada",
+                subtitle: "Recibimos los datos del viaje.",
+                status: statuses[0]
+            ),
+            PendingStep(
+                title: "Buscando conductor",
+                subtitle: "Estamos localizando al conductor más cercano.",
+                status: statuses[1]
+            ),
+            PendingStep(
+                title: "Conductor confirmado",
+                subtitle: "Llegará a la hora solicitada.",
+                status: statuses[2]
+            )
+        ]
+    }
+
+    var tripDetailsCard: some View {
+        let trip = viewModel.currentTrip
+        let fareText = trip?.formattedFare ?? viewModel.summaryFareText
+        let paymentText = trip?.paymentMethod.displayName ?? PaymentType.cash.displayName
+        let distanceText = trip?.formattedDistance ?? (viewModel.estimatedDistance.isEmpty ? "—" : viewModel.estimatedDistance)
+        let serviceTimeText = formattedServiceTime(for: trip?.scheduledAt ?? viewModel.requestedServiceDate)
+
+        let metrics: [TripDetailMetric] = [
+            TripDetailMetric(title: "Hora del servicio", value: serviceTimeText),
+            TripDetailMetric(title: "Total estimado", value: fareText),
+            TripDetailMetric(title: "Método de pago", value: paymentText),
+            TripDetailMetric(title: "Distancia", value: distanceText)
+        ]
+
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Detalles del viaje")
+                .font(ComfortaDesign.Typography.body1)
+                .foregroundColor(ComfortaDesign.Colors.textPrimary)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                ForEach(metrics) { metric in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(metric.title)
+                            .font(ComfortaDesign.Typography.caption1)
+                            .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                        Text(metric.value)
+                            .font(ComfortaDesign.Typography.body1)
+                            .foregroundColor(ComfortaDesign.Colors.textPrimary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(ComfortaDesign.Colors.surface)
+                    )
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(ComfortaDesign.Colors.surfaceSecondary)
         )
+    }
+
+    func formattedServiceTime(for date: Date) -> String {
+        let calendar = Calendar.current
+        let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale.current
+        timeFormatter.timeStyle = .short
+        timeFormatter.dateStyle = .none
+
+        if calendar.isDateInToday(date) {
+            return "Hoy, \(timeFormatter.string(from: date))"
+        }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale.current
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .short
+        return dateFormatter.string(from: date)
+    }
+
+    func pendingStepRow(_ step: PendingStep) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(pendingStepColor(step.status).opacity(step.status == .pending ? 0.15 : 0.25))
+                    .frame(width: 28, height: 28)
+
+                if step.status == .done {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(pendingStepColor(step.status))
+                } else if step.status == .active {
+                    Circle()
+                        .stroke(pendingStepColor(step.status), lineWidth: 2)
+                        .frame(width: 16, height: 16)
+                } else {
+                    Circle()
+                        .fill(pendingStepColor(step.status))
+                        .frame(width: 8, height: 8)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(step.title)
+                    .font(ComfortaDesign.Typography.body1)
+                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
+
+                Text(step.subtitle)
+                    .font(ComfortaDesign.Typography.caption1)
+                    .foregroundColor(ComfortaDesign.Colors.textSecondary)
+            }
+
+            Spacer()
+        }
+    }
+
+    func pendingStepColor(_ status: PendingStepStatus) -> Color {
+        switch status {
+        case .done:
+            return ComfortaDesign.Colors.primaryGreen
+        case .active:
+            return ComfortaDesign.Colors.accent
+        case .pending:
+            return ComfortaDesign.Colors.textTertiary
+        }
+    }
+}
+
+extension ProfessionalRideView {
+    // MARK: - Map Selection Mode Functions
+
+    private func enterMapSelectionMode() {
+        guard viewModel.pickupCoordinate != nil else {
+            return
+        }
+
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            isMapSelectionMode = true
+            bottomSheetPosition = .peek
+        }
+    }
+
+    private func handleMapTapAtCoordinate(_ coordinate: CLLocationCoordinate2D) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            tempSelectedLocation = coordinate
+            tempSelectedAddress = nil
+            isLoadingAddress = true
+        }
+
+        Task {
+            do {
+                let geocoder = ReverseGeocodingService.shared
+                let address = try await geocoder.reverseGeocode(coordinate: coordinate)
+
+                await MainActor.run {
+                    withAnimation {
+                        tempSelectedAddress = address
+                        isLoadingAddress = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    withAnimation {
+                        tempSelectedAddress = "Ubicación desconocida"
+                        isLoadingAddress = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func confirmDestination() {
+        guard let location = tempSelectedLocation, let address = tempSelectedAddress else { return }
+
+        viewModel.setDestination(address: address, coordinate: location)
+
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+            isMapSelectionMode = false
+            tempSelectedLocation = nil
+            tempSelectedAddress = nil
+            bottomSheetPosition = .middle
+        }
+    }
+
+    private func cancelMapSelection() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            isMapSelectionMode = false
+            tempSelectedLocation = nil
+            tempSelectedAddress = nil
+            isLoadingAddress = false
+        }
+    }
+
+    // MARK: - Map Selection Overlays
+
+    private var mapSelectionOverlay: some View {
+        VStack {
+            HStack {
+                Button {
+                    cancelMapSelection()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 24))
+                        Text("Cancelar")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule()
+                            .fill(.black.opacity(0.6))
+                    )
+                }
+
+                Spacer()
+
+                VStack(spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "hand.tap.fill")
+                            .font(.system(size: 16))
+                        Text("Toca el mapa")
+                            .font(.headline.weight(.bold))
+                    }
+                    .foregroundColor(.white)
+
+                    Text("Selecciona tu destino")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.9))
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(
+                    Capsule()
+                        .fill(.black.opacity(0.6))
+                )
+
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 60)
+
+            Spacer()
+        }
+    }
+
+    private var loadingIndicator: some View {
+        VStack {
+            Spacer()
+
+            HStack(spacing: 12) {
+                ProgressView()
+                    .tint(.white)
+                Text("Obteniendo dirección...")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.white)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(
+                Capsule()
+                    .fill(.black.opacity(0.75))
+                    .shadow(radius: 10)
+            )
+            .padding(.bottom, 150)
+        }
+    }
+
+    private func confirmationPanel(address: String) -> some View {
+        VStack {
+            Spacer()
+
+            VStack(spacing: 16) {
+                Text("Confirmar Destino")
+                    .font(.headline.weight(.bold))
+
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.opacity(0.2))
+                            .frame(width: 44, height: 44)
+
+                        Image(systemName: "mappin.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.blue)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Destino")
+                            .font(.caption.weight(.medium))
+                            .foregroundColor(.secondary)
+
+                        Text(address)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(2)
+                    }
+
+                    Spacer()
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(.background)
+                )
+
+                HStack(spacing: 12) {
+                    Button("Cancelar") {
+                        cancelMapSelection()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.background)
+                    )
+
+                    Button {
+                        confirmDestination()
+                    } label: {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("Confirmar")
+                        }
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.blue)
+                                .shadow(color: .blue.opacity(0.4), radius: 10)
+                        )
+                    }
+                }
+            }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 24)
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(0.2), radius: 20)
+            )
+            .padding(20)
+        }
     }
 }
 
@@ -677,5 +1440,9 @@ extension QuickDestination {
 }
 
 #Preview {
-    ProfessionalRideView(userName: "Usuario Test", onLogout: {})
+    ProfessionalRideView(
+        userName: "Usuario Test",
+        onLogout: {},
+        onProfileTap: {}
+    )
 }

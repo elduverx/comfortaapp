@@ -4,40 +4,18 @@ import UIKit
 /// API Configuration for Comforta Mobile App
 struct APIConfiguration {
 
-    // MARK: - Environment
-
-    enum Environment {
-        case development
-        case staging
-        case production
-
-        static var current: Environment {
-            #if DEBUG
-            return .development
-            #elseif STAGING
-            return .staging
-            #else
-            return .production
-            #endif
-        }
-    }
-
     // MARK: - Base URLs
 
     static var baseURL: String {
-        switch Environment.current {
-        case .development:
-            // Local development - Update this to your actual dev server or use production
-            return "https://comforta.es"
-        case .staging:
-            return "https://staging.comforta.es"
-        case .production:
-            return "https://comforta.es"
-        }
+        AppEnvironment.current.apiBaseURL
     }
 
     static var apiBasePath: String {
-        return "/api/mobile"
+        return "/api"
+    }
+
+    static var adminBasePath: String {
+        return "/api/admin"
     }
 
     static var fullAPIURL: String {
@@ -66,6 +44,13 @@ struct APIConfiguration {
 
         // Profile
         case profile
+
+        // Admin
+        case adminAuth
+        case adminTrips
+        case adminTripDetail(id: String)
+        case adminUsers
+        case deviceTokens
 
         var path: String {
             switch self {
@@ -98,11 +83,32 @@ struct APIConfiguration {
             // Profile
             case .profile:
                 return "/profile"
+
+            // Admin
+            case .adminAuth:
+                return "/auth"
+            case .adminTrips:
+                return "/viajes"
+            case .adminTripDetail(let id):
+                return "/viajes/\(id)"
+            case .adminUsers:
+                return "/users"
+            case .deviceTokens:
+                return "/device-tokens"
+            }
+        }
+
+        private var basePath: String {
+            switch self {
+            case .adminAuth, .adminTrips, .adminTripDetail, .adminUsers:
+                return APIConfiguration.adminBasePath
+            default:
+                return APIConfiguration.apiBasePath
             }
         }
 
         func url() -> URL {
-            let urlString = APIConfiguration.fullAPIURL + path
+            let urlString = APIConfiguration.baseURL + basePath + path
             guard let url = URL(string: urlString) else {
                 fatalError("Invalid URL: \(urlString)")
             }
@@ -124,11 +130,7 @@ struct APIConfiguration {
     // MARK: - Logging
 
     static var enableLogging: Bool {
-        #if DEBUG
-        return true
-        #else
-        return false
-        #endif
+        AppEnvironment.current.enableLogging
     }
 
     // MARK: - Feature Flags
@@ -168,7 +170,7 @@ extension APIConfiguration {
         assert(!baseURL.isEmpty, "Base URL must not be empty")
         assert(URL(string: baseURL) != nil, "Base URL must be valid")
         print("✅ API Configuration validated")
-        print("📍 Environment: \(Environment.current)")
+        print("📍 Environment: \(AppEnvironment.current)")
         print("🌐 Base URL: \(baseURL)")
         print("🔗 API Base Path: \(apiBasePath)")
     }

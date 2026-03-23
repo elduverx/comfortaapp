@@ -53,20 +53,15 @@ struct MapViewWrapper: View {
             return
         }
         
-        // Calculate region to show both pickup and destination
-        let coordinates = [trip.pickupLocation.coordinate.clLocationCoordinate, trip.destinationLocation.coordinate.clLocationCoordinate]
-        let rect = coordinates.reduce(MKMapRect.null) { rect, coordinate in
-            let point = MKMapPoint(coordinate)
-            let pointRect = MKMapRect(
-                x: point.x - 1000,
-                y: point.y - 1000,
-                width: 2000,
-                height: 2000
-            )
-            return rect.union(pointRect)
-        }
-        
-        region = MKCoordinateRegion(rect.insetBy(dx: -rect.size.width * 0.3, dy: -rect.size.height * 0.3))
+        let coordinates = [
+            trip.pickupLocation.coordinate.clLocationCoordinate,
+            trip.destinationLocation.coordinate.clLocationCoordinate
+        ]
+        region = MKCoordinateRegion.regionToFit(
+            coordinates: coordinates,
+            paddingFactor: 1.35,
+            minimumSpan: 0.01
+        )
     }
 }
 

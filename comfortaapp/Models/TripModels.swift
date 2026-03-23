@@ -133,6 +133,48 @@ public struct Trip: Identifiable, Codable, Equatable {
         self.route = nil
         self.realTimeTracking = []
     }
+
+    public init(
+        id: String,
+        userId: String,
+        status: TripStatus,
+        pickupLocation: LocationInfo,
+        destinationLocation: LocationInfo,
+        estimatedFare: Double,
+        estimatedDistance: Double,
+        estimatedDuration: Double,
+        vehicleType: String,
+        paymentMethod: PaymentMethodInfo,
+        createdAt: Date,
+        scheduledAt: Date? = nil
+    ) {
+        self.id = id
+        self.userId = userId
+        self.driverId = nil
+        self.status = status
+        self.pickupLocation = pickupLocation
+        self.destinationLocation = destinationLocation
+        self.estimatedFare = estimatedFare
+        self.actualFare = nil
+        self.estimatedDistance = estimatedDistance
+        self.actualDistance = nil
+        self.estimatedDuration = estimatedDuration
+        self.actualDuration = nil
+        self.vehicleType = vehicleType
+        self.paymentMethod = paymentMethod
+        self.specialRequests = []
+        self.createdAt = createdAt
+        self.scheduledAt = scheduledAt
+        self.pickedUpAt = nil
+        self.droppedOffAt = nil
+        self.cancelledAt = nil
+        self.driverRating = nil
+        self.passengerRating = nil
+        self.driverFeedback = nil
+        self.passengerFeedback = nil
+        self.route = nil
+        self.realTimeTracking = []
+    }
     
     // MARK: - Equatable
     public static func == (lhs: Trip, rhs: Trip) -> Bool {

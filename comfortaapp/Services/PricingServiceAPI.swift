@@ -53,7 +53,7 @@ class PricingServiceAPI: ObservableObject {
             // Convert API response to app PricingResponse
             let pricingResponse = PricingResponse(
                 distance: apiResponse.distance,
-                estimatedTime: formatDuration(from: apiResponse.distance),
+                estimatedTime: formatDurationFromDistance(apiResponse.distance),
                 basePrice: apiResponse.basePrice,
                 totalPrice: apiResponse.totalPrice,
                 priceBreakdown: PriceBreakdown(
@@ -99,23 +99,30 @@ class PricingServiceAPI: ObservableObject {
         origin: String?,
         destination: String
     ) async throws -> PricingResponse {
-        // Estimate distance (very rough approximation)
-        let estimatedDistance = 25.0 // Default estimate
-        let pricePerKm = getPricePerKm(distance: estimatedDistance)
-        let basePrice = estimatedDistance * pricePerKm
-
-        // Check for airport surcharge
-        let airportSurcharge: Double = if let origin = origin, isAirportLocation(origin) || isAirportLocation(destination) {
-            8.0
+        let routeInfo: RouteService.RouteInfo?
+        if let origin = origin {
+            routeInfo = try? await RouteService().calculateRoute(from: origin, to: destination)
         } else {
-            0.0
+            routeInfo = nil
         }
 
-        let totalPrice = max(basePrice + airportSurcharge, 7.50) // Minimum 7.50€
+        let estimatedDistance = routeInfo?.distance ?? 25.0
+
+        let pricePerKm = PricingRules.pricePerKm(for: estimatedDistance)
+        var basePrice = estimatedDistance * pricePerKm
+        basePrice = PricingRules.applyMinimums(to: basePrice, distanceKm: estimatedDistance)
+        basePrice = round(basePrice * 100) / 100
+
+        let airportSurcharge: Double = PricingRules.hasAirportPortOrStation(
+            origin: origin,
+            destination: destination
+        ) ? PricingRules.airportSurcharge : 0.0
+
+        let totalPrice = round((basePrice + airportSurcharge) * 100) / 100
 
         return PricingResponse(
             distance: estimatedDistance,
-            estimatedTime: formatDuration(from: estimatedDistance),
+            estimatedTime: routeInfo.map { formatDurationFromDuration($0.duration) } ?? formatDurationFromDistance(estimatedDistance),
             basePrice: basePrice,
             totalPrice: totalPrice,
             priceBreakdown: PriceBreakdown(
@@ -129,28 +136,21 @@ class PricingServiceAPI: ObservableObject {
 
     // MARK: - Helpers
 
-    private func getPricePerKm(distance: Double) -> Double {
-        if distance > 100 {
-            return 1.1
-        } else if distance >= 50 {
-            return 1.2
+    private func formatDurationFromDistance(_ distance: Double) -> String {
+        // Rough estimate: 60 km/h average
+        let durationMinutes = (distance / 60.0) * 60.0
+        let hours = Int(durationMinutes / 60)
+        let minutes = Int(durationMinutes.truncatingRemainder(dividingBy: 60))
+
+        if hours > 0 {
+            return "\(hours)h \(minutes)min"
         } else {
-            return 1.5
+            return "\(minutes) min"
         }
     }
 
-    private func isAirportLocation(_ address: String) -> Bool {
-        let lowercaseAddress = address.lowercased()
-        let keywords = [
-            "aeropuerto", "airport", "puerto", "port",
-            "estación", "estacion", "station", "renfe"
-        ]
-        return keywords.contains { lowercaseAddress.contains($0) }
-    }
-
-    private func formatDuration(from distance: Double) -> String {
-        // Rough estimate: 60 km/h average
-        let durationMinutes = (distance / 60.0) * 60.0
+    private func formatDurationFromDuration(_ duration: TimeInterval) -> String {
+        let durationMinutes = duration / 60.0
         let hours = Int(durationMinutes / 60)
         let minutes = Int(durationMinutes.truncatingRemainder(dividingBy: 60))
 

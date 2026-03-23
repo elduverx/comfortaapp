@@ -42,8 +42,14 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .showTripRating)) { notification in
+            if let trip = notification.userInfo?["trip"] as? Trip {
+                tripToRate = trip
+                showingTripRating = true
+                return
+            }
+
             if let tripId = notification.userInfo?["trip_id"] as? String,
-               let trip = TripBookingService.shared.getTrip(by: tripId) {
+               let trip = resolveTripForRating(tripId: tripId) {
                 tripToRate = trip
                 showingTripRating = true
             }
@@ -54,6 +60,12 @@ struct ContentView: View {
                     trip: trip,
                     onSubmit: { rating, feedback in
                         TripBookingService.shared.rateTrip(trip.id, rating: rating, feedback: feedback)
+                        showingTripRating = false
+                    },
+                    onRequestAnotherTrip: {
+                        TripServiceAPI.shared.clearActiveTrip()
+                        TripBookingService.shared.activeTrip = nil
+                        NotificationCenter.default.post(name: .requestNewTrip, object: nil)
                         showingTripRating = false
                     },
                     onSkip: {
@@ -82,9 +94,10 @@ struct ContentView: View {
         requestNotificationPermission()
         
         // Validate existing session
-        if let userId = userManager.currentUser?.id {
+        if userManager.isAuthenticated,
+           let appleUserId = UserDefaults.standard.string(forKey: "apple_user_id") {
             Task {
-                let isValid = await userManager.validateExistingSession(userId: userId)
+                let isValid = await userManager.validateExistingSession(userId: appleUserId)
                     .values.first(where: { _ in true })
                 if isValid == false {
                     userManager.signOut()
@@ -94,9 +107,10 @@ struct ContentView: View {
     }
     
     private func refreshUserSession() {
-        if let userId = userManager.currentUser?.id {
+        if userManager.isAuthenticated,
+           let appleUserId = UserDefaults.standard.string(forKey: "apple_user_id") {
             Task {
-                _ = await userManager.validateExistingSession(userId: userId)
+                _ = await userManager.validateExistingSession(userId: appleUserId)
                     .values.first(where: { _ in true })
             }
         }
@@ -117,112 +131,84 @@ struct ContentView: View {
         }
     }
 
-    private var modernSignInView: some View {
-        ZStack {
-            // Animated Background
-            LinearGradient(
-                colors: [
-                    .black,
-                    ComfortaDesign.Colors.background,
-                    ComfortaDesign.Colors.primaryGreen.opacity(0.12),
-                    ComfortaDesign.Colors.background
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-            
-            VStack(spacing: ComfortaDesign.Spacing.xxl) {
-                Spacer()
-                
-                // Logo and Title
-                VStack(spacing: ComfortaDesign.Spacing.lg) {
-                    // Logo placeholder
-                    Image("AppIcon")
-                        .font(.system(size: 80, weight: .light))
-                        .foregroundColor(ComfortaDesign.Colors.primaryGreen)
-                    
-                    VStack(spacing: ComfortaDesign.Spacing.sm) {
-                        Text("Comforta")
-                            .font(ComfortaDesign.Typography.hero)
-                            .foregroundColor(ComfortaDesign.Colors.textPrimary)
-                        
-                        Text("Viaje a larga distancia al precio verdadero")
-                            .font(ComfortaDesign.Typography.body1)
-                            .foregroundColor(ComfortaDesign.Colors.textSecondary)
-                            .multilineTextAlignment(.center)
-                    }
-                }
-                
-                // Sign In Card
-                ModernCard(style: .glass) {
-                    VStack(spacing: ComfortaDesign.Spacing.lg) {
-                        Text("Bienvenido")
-                            .font(ComfortaDesign.Typography.title3)
-                            .foregroundColor(ComfortaDesign.Colors.textPrimary)
-                        
-                        Text("Conecta para unirte a los viajes premium")
-                            .font(ComfortaDesign.Typography.body2)
-                            .foregroundColor(ComfortaDesign.Colors.textSecondary)
-                            .multilineTextAlignment(.center)
-                        
-                        // Apple Sign In Button
-                        SignInWithAppleButton(.signIn) { request in
-                            request.requestedScopes = [.fullName, .email]
-                        } onCompletion: { result in
-                            handleAuthorization(result: result)
-                        }
-                        .signInWithAppleButtonStyle(.white)
-                        .frame(height: 52)
-                        .cornerRadius(ComfortaDesign.Radius.md)
-                        
-                        // Admin Login Button
-                        Button {
-                            handleAdminLogin()
-                        } label: {
-                            HStack {
-                                Image(systemName: "person.badge.key.fill")
-                                Text("Iniciar como administrador")
-                            }
-                            .font(ComfortaDesign.Typography.body2)
-                            .foregroundColor(ComfortaDesign.Colors.primaryGreen)
-                            .frame(height: 52)
-                            .frame(maxWidth: .infinity)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: ComfortaDesign.Radius.md)
-                                    .stroke(ComfortaDesign.Colors.primaryGreen, lineWidth: 2)
-                            )
-                        }
-                        
-                        if let authError = userManager.authenticationError {
-                            Text(authError)
-                                .foregroundColor(ComfortaDesign.Colors.error)
-                                .font(ComfortaDesign.Typography.caption1)
-                                .multilineTextAlignment(.center)
-                        }
-                    }
-                }
-                .padding(.horizontal, ComfortaDesign.Spacing.xl)
-                
-                Spacer()
-                
-                // Footer
-                VStack(spacing: ComfortaDesign.Spacing.xs) {
-                    Text("Al continuar, aceptas nuestros")
-                        .font(ComfortaDesign.Typography.caption2)
-                        .foregroundColor(ComfortaDesign.Colors.textTertiary)
-                    
-                    HStack(spacing: ComfortaDesign.Spacing.xs) {
-                        Button("Términos de servicio") {}
-                        Text("y")
-                        Button("Política de privacidad") {}
-                    }
-                    .font(ComfortaDesign.Typography.caption2)
-                    .foregroundColor(ComfortaDesign.Colors.primaryGreen)
-                }
-                .padding(.bottom, ComfortaDesign.Spacing.xl)
-            }
+    private func resolveTripForRating(tripId: String) -> Trip? {
+        if let trip = TripBookingService.shared.getTrip(by: tripId) {
+            return trip
         }
+
+        if let apiTrip = TripServiceAPI.shared.getTripById(tripId) {
+            return mapAPITripForRating(apiTrip)
+        }
+
+        if let adminTrip = AdminService.shared.allTrips.first(where: { $0.id == tripId }) {
+            return adminTrip
+        }
+
+        return nil
+    }
+
+    private func mapAPITripForRating(_ apiTrip: APITrip) -> Trip {
+        let pickupAddress = apiTrip.lugarRecogida ?? "Recogida no especificada"
+        let pickupLocation = LocationInfo(
+            address: pickupAddress,
+            coordinate: coordinateFromAPI(lat: apiTrip.pickupLat, lng: apiTrip.pickupLng)
+        )
+        let destinationLocation = LocationInfo(
+            address: apiTrip.destino,
+            coordinate: coordinateFromAPI(lat: apiTrip.destinationLat, lng: apiTrip.destinationLng)
+        )
+
+        let estimatedDuration = estimateDurationSeconds(distanceKm: apiTrip.distanciaKm)
+        let paymentMethod = PaymentMethodInfo(
+            type: paymentType(from: apiTrip.paymentMethod),
+            displayName: apiTrip.paymentMethod
+        )
+
+        return Trip(
+            id: apiTrip.id,
+            userId: userManager.currentUser?.id ?? "user",
+            status: .completed,
+            pickupLocation: pickupLocation,
+            destinationLocation: destinationLocation,
+            estimatedFare: apiTrip.precioTotal ?? 0,
+            estimatedDistance: apiTrip.distanciaKm ?? 0,
+            estimatedDuration: estimatedDuration,
+            vehicleType: "Standard",
+            paymentMethod: paymentMethod,
+            createdAt: apiTrip.createdAt.toDate() ?? Date(),
+            scheduledAt: apiTrip.fechaInicio.toDate()
+        )
+    }
+
+    private func coordinateFromAPI(lat: Double?, lng: Double?) -> CLLocationCoordinate2D {
+        if let lat = lat, let lng = lng {
+            return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        }
+        return CLLocationCoordinate2D(latitude: 0, longitude: 0)
+    }
+
+    private func estimateDurationSeconds(distanceKm: Double?) -> Double {
+        guard let distanceKm = distanceKm else { return 0 }
+        return (distanceKm / 50.0) * 3600.0
+    }
+
+    private func paymentType(from method: String?) -> PaymentType {
+        switch method?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "APPLE_PAY":
+            return .applePay
+        case "CASH", "EFECTIVO":
+            return .cash
+        default:
+            return .creditCard
+        }
+    }
+
+    private var modernSignInView: some View {
+        AnimatedSignInView(
+            userManager: userManager,
+            handleAuthorization: handleAuthorization,
+            handleAdminLogin: handleAdminLogin
+        )
     }
     
     // Legacy sign in view for fallback
@@ -274,6 +260,7 @@ struct ContentView: View {
         switch result {
         case .success(let authorization):
             guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else { return }
+            UserDefaults.standard.set(credential.user, forKey: "apple_user_id")
             userManager.signIn(with: credential)
         case .failure(let error):
             userManager.authenticationError = error.localizedDescription

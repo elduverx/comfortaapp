@@ -1,6 +1,7 @@
 import Foundation
 import CoreLocation
 import Combine
+import MapKit
 
 class PricingService: ObservableObject {
     static let shared = PricingService()
@@ -19,53 +20,80 @@ class PricingService: ObservableObject {
     // MARK: - Legacy Support
     
     func calculatePricing(origin: String, destination: String) async throws -> PricingResponse {
-        // Legacy method for backward compatibility
-        let estimatedDistance = Double.random(in: 5...50)
-        let estimatedDuration = estimateDuration(distance: estimatedDistance)
-        
-        let baseFare = currentPricing.baseFare
-        let distanceFare = estimatedDistance * currentPricing.perKilometerRate
-        let timeFare = (estimatedDuration / 60.0) * currentPricing.perMinuteRate
-        let totalFare = (baseFare + distanceFare + timeFare) * surgeMultiplier
-        
+        let routeService = RouteService()
+        let routeInfo = try? await routeService.calculateRoute(from: origin, to: destination)
+
+        let estimatedDistance = routeInfo?.distance ?? 25.0
+        let estimatedDuration = routeInfo?.duration ?? estimateDuration(distance: estimatedDistance)
+
+        let pricePerKm = PricingRules.pricePerKm(for: estimatedDistance)
+        let distanceFare = estimatedDistance * pricePerKm
+        var basePrice = distanceFare
+        basePrice = PricingRules.applyMinimums(
+            to: basePrice,
+            distanceKm: estimatedDistance,
+            minimumFare: currentPricing.minimumFare,
+            minimumFareForLongTrips: currentPricing.minimumFareForLongTrips,
+            minimumFareThresholdKm: currentPricing.minimumFareThreshold
+        )
+
+        let hasAirportSurcharge = PricingRules.hasAirportPortOrStation(
+            origin: origin,
+            destination: destination
+        )
+        let airportSurcharge = hasAirportSurcharge ? currentPricing.airportSurcharge : 0
+        let totalFare = basePrice + airportSurcharge
+
+        let roundedBasePrice = round(basePrice * 100) / 100
+        let roundedTotalFare = round(totalFare * 100) / 100
+
         return PricingResponse(
             distance: estimatedDistance,
             estimatedTime: formatDuration(estimatedDuration),
-            basePrice: baseFare,
-            totalPrice: max(totalFare, currentPricing.minimumFare),
+            basePrice: roundedBasePrice,
+            totalPrice: roundedTotalFare,
             priceBreakdown: PriceBreakdown(
-                baseRate: baseFare,
-                distanceRate: distanceFare,
-                timeRate: timeFare,
-                additionalFees: 0.00
+                baseRate: roundedBasePrice,
+                distanceRate: round(distanceFare * 100) / 100,
+                timeRate: 0,
+                additionalFees: airportSurcharge
             )
         )
     }
     
     // MARK: - Advanced Fare Calculation
-    
-    func calculateFare(distance: Double, vehicleType: String, duration: TimeInterval? = nil) -> Double {
-        let baseFare = currentPricing.baseFare
-        let distanceFare = distance * currentPricing.perKilometerRate
-        
-        var durationFare: Double = 0
-        if let duration = duration {
-            durationFare = (duration / 60.0) * currentPricing.perMinuteRate
-        }
-        
-        // Vehicle type multiplier
+
+    /// Calcula la tarifa según la nueva fórmula de precios Comforta
+    /// - Precio por km segun distancia: <50km 1.50, 50-100km 1.20, >100km 1.10
+    /// - Minimo absoluto: 7.50
+    /// - Minimo para viajes >= 10km: 15
+    /// - Recargo aeropuerto/puerto/estacion: +8
+    func calculateFare(distance: Double, vehicleType: String, duration: TimeInterval? = nil, includesAirport: Bool = false) -> Double {
+        let pricePerKm = PricingRules.pricePerKm(for: distance)
+        var fare = distance * pricePerKm
+        fare = PricingRules.applyMinimums(
+            to: fare,
+            distanceKm: distance,
+            minimumFare: currentPricing.minimumFare,
+            minimumFareForLongTrips: currentPricing.minimumFareForLongTrips,
+            minimumFareThresholdKm: currentPricing.minimumFareThreshold
+        )
+
+        // Vehicle type multiplier (no se aplica en la nueva fórmula base, pero se mantiene por compatibilidad)
         let vehicleMultiplier = currentPricing.vehicleMultipliers[vehicleType] ?? 1.0
-        
-        // Base calculation
-        var totalFare = (baseFare + distanceFare + durationFare) * vehicleMultiplier
-        
+        if vehicleMultiplier != 1.0 {
+            fare *= vehicleMultiplier
+        }
+
         // Apply surge pricing if applicable
-        totalFare *= surgeMultiplier
-        
-        // Apply minimum fare
-        totalFare = max(totalFare, currentPricing.minimumFare)
-        
-        return round(totalFare * 100) / 100 // Round to 2 decimal places
+        fare *= surgeMultiplier
+
+        // Agregar recargo de aeropuerto si aplica
+        if includesAirport {
+            fare += currentPricing.airportSurcharge
+        }
+
+        return round(fare * 100) / 100 // Round to 2 decimal places
     }
     
     func calculateAdvancedFare(
@@ -73,43 +101,59 @@ class PricingService: ObservableObject {
         destination: CLLocationCoordinate2D,
         vehicleType: VehicleType,
         scheduledTime: Date? = nil,
-        promoCode: String? = nil
+        promoCode: String? = nil,
+        includesAirport: Bool = false
     ) -> FareBreakdown {
         let distance = calculateDistance(from: pickup, to: destination)
         let estimatedDuration = estimateDuration(distance: distance)
-        
-        let baseFare = currentPricing.baseFare
-        let distanceFare = distance * currentPricing.perKilometerRate
-        let durationFare = (estimatedDuration / 60.0) * currentPricing.perMinuteRate
+
+        let pricePerKm = PricingRules.pricePerKm(for: distance)
+        var baseFare = distance * pricePerKm
+        baseFare = PricingRules.applyMinimums(
+            to: baseFare,
+            distanceKm: distance,
+            minimumFare: currentPricing.minimumFare,
+            minimumFareForLongTrips: currentPricing.minimumFareForLongTrips,
+            minimumFareThresholdKm: currentPricing.minimumFareThreshold
+        )
+
+        let distanceFare = distance * pricePerKm
+        let durationFare: Double = 0 // No se cobra por minuto en la nueva fórmula
         let vehicleMultiplier = vehicleType.baseRate
-        
-        var subtotal = (baseFare + distanceFare + durationFare) * vehicleMultiplier
-        
+
+        var subtotal = baseFare * vehicleMultiplier
+
         // Time-based surges
         let timeSurge = calculateTimeSurge(for: scheduledTime ?? Date())
         let demandSurge = surgeMultiplier
         let totalSurge = max(timeSurge, demandSurge)
-        
+
         let surgeAmount = subtotal * (totalSurge - 1.0)
         subtotal += surgeAmount
-        
+
         // Booking fees
         var bookingFee: Double = 0
         if scheduledTime != nil {
             bookingFee = 2.00
         }
-        
+
+        // Recargo aeropuerto
+        var airportFee: Double = 0
+        if includesAirport {
+            airportFee = currentPricing.airportSurcharge
+        }
+
         // Tolls estimation (basic)
         let tollEstimate = estimateTolls(from: pickup, to: destination)
-        
+
         // Discount from promo code
         var discount: Double = 0
         if let promoCode = promoCode {
             discount = calculatePromoDiscount(code: promoCode, subtotal: subtotal)
         }
-        
-        let total = max(subtotal + bookingFee + tollEstimate - discount, currentPricing.minimumFare)
-        
+
+        let total = max(subtotal + bookingFee + airportFee + tollEstimate - discount, currentPricing.minimumFare)
+
         return FareBreakdown(
             baseFare: baseFare,
             distanceFare: distanceFare,

@@ -4,33 +4,44 @@ struct MainTabView: View {
     @State private var selectedTab: TabBarItem = .map
     let userName: String
     let onLogout: () -> Void
-    
+
     var body: some View {
         TabView(selection: $selectedTab) {
             tabContainer(title: "Mapa", hidesNavigationBar: true) {
-                ProfessionalRideView(
+                RideHomeView(
                     userName: userName,
-                    onLogout: onLogout
+                    onLogout: onLogout,
+                    onProfileTap: {
+                        selectedTab = .profile
+                    }
                 )
             }
             .tabItem {
-                Label(TabBarItem.map.title, systemImage: TabBarItem.map.icon)
+                Label("Mapa", systemImage: "map")
             }
             .tag(TabBarItem.map)
-            
+
             tabContainer(title: "Viajes") {
                 TripsView()
             }
             .tabItem {
-                Label(TabBarItem.trips.title, systemImage: TabBarItem.trips.icon)
+                Label("Viajes", systemImage: "car.circle")
             }
             .tag(TabBarItem.trips)
-            
+
+            tabContainer(title: "Beneficios") {
+                BenefitsView()
+            }
+            .tabItem {
+                Label("Beneficios", systemImage: "star.circle")
+            }
+            .tag(TabBarItem.benefits)
+
             tabContainer(title: "Perfil") {
                 ProfileView()
             }
             .tabItem {
-                Label(TabBarItem.profile.title, systemImage: TabBarItem.profile.icon)
+                Label("Perfil", systemImage: "person.circle")
             }
             .tag(TabBarItem.profile)
         }
@@ -39,8 +50,15 @@ struct MainTabView: View {
         .onAppear {
             loadSelectedTab()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showActiveTrip)) { _ in
+            selectedTab = .map
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showTripDetails)) { _ in
+            selectedTab = .map
+        }
         .onChange(of: selectedTab) { _, newTab in
             saveSelectedTab(newTab)
+            HapticManager.shared.impact(.light)
         }
     }
     
@@ -55,7 +73,7 @@ struct MainTabView: View {
         UserDefaults.standard.set(tab.rawValue, forKey: "selected_tab")
     }
     
-    private func tabContainer<Content: View>(title: String, hidesNavigationBar: Bool = false, @ViewBuilder content: () -> Content) -> some View {
+    private func tabContainer<Content: View>(title: LocalizedStringKey, hidesNavigationBar: Bool = false, @ViewBuilder content: () -> Content) -> some View {
         NavigationStack {
             content()
                 .background(ComfortaDesign.Colors.background.ignoresSafeArea())
@@ -65,7 +83,7 @@ struct MainTabView: View {
 }
 
 private struct NavigationStyleModifier: ViewModifier {
-    let title: String
+    let title: LocalizedStringKey
     let hidesNavigationBar: Bool
     
     func body(content: Content) -> some View {

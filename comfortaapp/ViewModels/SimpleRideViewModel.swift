@@ -22,6 +22,7 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
     @Published var routePolyline: MKPolyline?
     @Published var isCalculatingRoute: Bool = false
     @Published var currentTripState: TripState = .searchingLocations
+    @Published var requestedServiceDate: Date = Date()
     @Published var assignedDriver: Driver?
     @Published var currentTrip: Trip?
     
@@ -35,19 +36,72 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
     private let destinationCompleter = MKLocalSearchCompleter()
     private let locationManager = CLLocationManager()
     private let geocoder = CLGeocoder()
-    private let pricingService = PricingServiceAPI.shared
     private let tripService = TripServiceAPI.shared
+    private var cancellables = Set<AnyCancellable>()
     private var pricingEstimate: PricingResponse?
     private var hasInitializedPickup = false
+    private var tripPollingTask: Task<Void, Never>?
+    private var tripRefreshTask: Task<Void, Never>?
+    private var persistenceCancellable: AnyCancellable?
+    private let activeTripStorageKey = "active_trip_snapshot_v1"
     
     var pickupCoordinate: CLLocationCoordinate2D?
     var destinationCoordinate: CLLocationCoordinate2D?
+
+    var summaryFareText: String {
+        if let actualFare = currentTrip?.actualFare {
+            return formatFare(actualFare)
+        }
+        if let estimatedFareValue = currentTrip?.estimatedFare {
+            return formatFare(estimatedFareValue)
+        }
+        if let totalPrice = pricingEstimate?.totalPrice {
+            return formatFare(totalPrice)
+        }
+        return estimatedFare
+    }
+
+    private var shouldAllowTripPlanningUpdates: Bool {
+        currentTripState == .searchingLocations || currentTripState == .readyToConfirm
+    }
+
+    var recentDestinations: [QuickDestination] {
+        let trips = TripBookingService.shared.getTripHistory(limit: 10)
+        var destinations: [QuickDestination] = []
+        var seenAddresses = Set<String>()
+
+        for trip in trips {
+            let address = trip.destinationLocation.address
+            if !seenAddresses.contains(address) {
+                seenAddresses.insert(address)
+                destinations.append(QuickDestination(
+                    title: extractLocationName(from: address),
+                    subtitle: address,
+                    coordinate: trip.destinationLocation.clLocationCoordinate
+                ))
+
+                if destinations.count >= 5 {
+                    break
+                }
+            }
+        }
+
+        return destinations
+    }
+
+    private func extractLocationName(from address: String) -> String {
+        let components = address.components(separatedBy: ",")
+        return components.first?.trimmingCharacters(in: .whitespaces) ?? address
+    }
     
     // MARK: - Initialization
     override init() {
         super.init()
         setupLocationManager()
         setupCompleters()
+        restoreActiveTripIfAvailable()
+        setupTripPersistence()
+        setupNotificationListeners()
     }
     
     // MARK: - Setup Methods
@@ -67,6 +121,131 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
         destinationCompleter.delegate = self
         destinationCompleter.resultTypes = [.address, .pointOfInterest]
         destinationCompleter.region = mapRegion
+    }
+
+    private func setupNotificationListeners() {
+        NotificationCenter.default.publisher(for: .adminTripCompleted)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] notification in
+                guard let tripId = notification.userInfo?["trip_id"] as? String else { return }
+                let trip = notification.userInfo?["trip"] as? Trip
+                self?.handleAdminTripCompleted(tripId: tripId, trip: trip)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .requestNewTrip)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.clearTrip()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handleAdminTripCompleted(tripId: String, trip: Trip?) {
+        if let existingTrip = currentTrip, existingTrip.id == tripId {
+            currentTrip?.status = .completed
+            currentTripState = .completed
+        } else if let trip = trip, currentTrip == nil {
+            currentTrip = trip
+            currentTripState = .completed
+        }
+
+        Task {
+            if let apiTrip = try? await tripService.getTripStatus(tripId: tripId) {
+                applyNotificationTrip(apiTrip)
+            }
+        }
+
+        if shouldNotifyRideUpdates(), let trip = trip ?? currentTrip {
+            NotificationService.shared.scheduleTripCompletedNotification(for: trip)
+        }
+    }
+
+    private func setupTripPersistence() {
+        persistenceCancellable = Publishers.CombineLatest3($currentTrip, $assignedDriver, $currentTripState)
+            .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
+            .sink { [weak self] _, _, _ in
+                self?.persistActiveTripIfNeeded()
+            }
+    }
+
+    private func persistActiveTripIfNeeded() {
+        guard let trip = currentTrip else {
+            clearPersistedActiveTrip()
+            return
+        }
+
+        if !shouldPersistActiveTrip(trip: trip) {
+            clearPersistedActiveTrip()
+            return
+        }
+
+        let snapshot = ActiveTripSnapshot(trip: trip, driver: assignedDriver)
+        guard let encoded = try? JSONEncoder().encode(snapshot) else { return }
+        UserDefaults.standard.set(encoded, forKey: activeTripStorageKey)
+    }
+
+    private func clearPersistedActiveTrip() {
+        UserDefaults.standard.removeObject(forKey: activeTripStorageKey)
+    }
+
+    private func shouldPersistActiveTrip(trip: Trip) -> Bool {
+        let blockedStates: Set<TripState> = [
+            .searchingLocations,
+            .readyToConfirm,
+            .confirmingTrip,
+            .processingPayment
+        ]
+        if blockedStates.contains(currentTripState) {
+            return false
+        }
+
+        let terminalStatuses: Set<TripStatus> = [.completed, .cancelled, .failed]
+        if terminalStatuses.contains(trip.status) {
+            return false
+        }
+
+        return true
+    }
+
+    private func restoreActiveTripIfAvailable() {
+        guard let data = UserDefaults.standard.data(forKey: activeTripStorageKey),
+              let snapshot = try? JSONDecoder().decode(ActiveTripSnapshot.self, from: data) else {
+            return
+        }
+
+        let trip = snapshot.trip
+        if [.completed, .cancelled, .failed].contains(trip.status) {
+            clearPersistedActiveTrip()
+            return
+        }
+
+        currentTrip = trip
+        assignedDriver = snapshot.driver
+        pickupText = trip.pickupLocation.address
+        destinationText = trip.destinationLocation.address
+        pickupCoordinate = trip.pickupLocation.clLocationCoordinate
+        destinationCoordinate = trip.destinationLocation.clLocationCoordinate
+        estimatedFare = formatFare(trip.actualFare ?? trip.estimatedFare)
+        estimatedDistance = String(format: "%.1f km", trip.actualDistance ?? trip.estimatedDistance)
+        estimatedDuration = formatDuration(trip.actualDuration ?? trip.estimatedDuration)
+        requestedServiceDate = trip.scheduledAt ?? trip.createdAt
+
+        let hasDriver = assignedDriver != nil || trip.driverId?.isEmpty == false
+        currentTripState = tripState(from: trip.status, hasDriver: hasDriver)
+
+        if let pickup = pickupCoordinate, let destination = destinationCoordinate {
+            updateMapRegionForRoute(pickup: pickup, destination: destination)
+            Task { @MainActor in
+                if let route = try? await calculateRoute(from: pickup, to: destination) {
+                    routePolyline = route.polyline
+                }
+            }
+        } else if let pickup = pickupCoordinate {
+            updateMapRegion(to: pickup)
+        }
+
+        resumeTripMonitoringIfNeeded()
     }
     
     // MARK: - Public Methods
@@ -105,9 +284,15 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
         pricingEstimate = nil
         routePolyline = nil
         currentTripState = .searchingLocations
+        requestedServiceDate = Date()
         assignedDriver = nil
         currentTrip = nil
+        tripPollingTask?.cancel()
+        tripPollingTask = nil
+        tripRefreshTask?.cancel()
+        tripRefreshTask = nil
         deactivateFields()
+        clearPersistedActiveTrip()
     }
     
     func updatePickupText(_ text: String) {
@@ -173,6 +358,10 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
             locationManager.requestLocation()
             return
         }
+
+        guard shouldAllowTripPlanningUpdates else {
+            return
+        }
         
         Task {
             do {
@@ -211,6 +400,9 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
     }
     
     func calculateFare() {
+        guard shouldAllowTripPlanningUpdates else {
+            return
+        }
         guard let pickup = pickupCoordinate,
               let destination = destinationCoordinate else {
             estimatedFare = "Selecciona ubicaciones"
@@ -230,15 +422,7 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
 
         Task {
             let routeTask = Task { try await calculateRoute(from: pickup, to: destination) }
-            let pricingTask = Task {
-                try await pricingService.calculatePricing(
-                    origin: originAddress,
-                    destination: destinationAddress
-                )
-            }
-
             let route = try? await routeTask.value
-            let pricing = try? await pricingTask.value
 
             await MainActor.run {
                 let distanceKm: Double
@@ -260,12 +444,11 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
                     routePolyline = nil
                 }
 
+                let pricing = buildPricingEstimate(distanceKm: distanceKm, duration: duration)
                 pricingEstimate = pricing
 
-                let fare = pricing?.totalPrice ?? calculateFareAmount(for: distanceKm)
-
                 estimatedDistance = String(format: "%.1f km%@", distanceKm, distanceLabelSuffix)
-                estimatedFare = fare.formatted(.currency(code: "EUR").locale(Locale(identifier: "es_ES")))
+                estimatedFare = pricing.totalPrice.formatted(.currency(code: "EUR").locale(Locale(identifier: "es_ES")))
                 estimatedDuration = formatDuration(duration)
 
                 updateMapRegionForRoute(pickup: pickup, destination: destination)
@@ -296,26 +479,11 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
     }
     
     private func updateMapRegionForRoute(pickup: CLLocationCoordinate2D, destination: CLLocationCoordinate2D) {
-        let coordinates = [pickup, destination]
-        let lats = coordinates.map { $0.latitude }
-        let lons = coordinates.map { $0.longitude }
-        
-        let minLat = lats.min()!
-        let maxLat = lats.max()!
-        let minLon = lons.min()!
-        let maxLon = lons.max()!
-        
-        let center = CLLocationCoordinate2D(
-            latitude: (minLat + maxLat) / 2,
-            longitude: (minLon + maxLon) / 2
+        mapRegion = MKCoordinateRegion.regionToFit(
+            coordinates: [pickup, destination],
+            paddingFactor: 1.35,
+            minimumSpan: 0.01
         )
-        
-        let span = MKCoordinateSpan(
-            latitudeDelta: (maxLat - minLat) * 1.3,
-            longitudeDelta: (maxLon - minLon) * 1.3
-        )
-        
-        mapRegion = MKCoordinateRegion(center: center, span: span)
     }
     
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -329,13 +497,50 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
             return "\(minutes) min"
         }
     }
+
+    private func formatFare(_ amount: Double) -> String {
+        amount.formatted(.currency(code: "EUR").locale(Locale(identifier: "es_ES")))
+    }
     
     private func calculateFareAmount(for distanceKm: Double) -> Double {
-        if distanceKm <= 100 {
-            return distanceKm * 1.5
-        } else {
-            return (100 * 1.5) + ((distanceKm - 100) * 1.1)
+        guard distanceKm > 0 else { return PricingRules.minimumFare }
+
+        let pricePerKm = PricingRules.pricePerKm(for: distanceKm)
+        var baseFare = distanceKm * pricePerKm
+        baseFare = PricingRules.applyMinimums(to: baseFare, distanceKm: distanceKm)
+
+        if PricingRules.hasAirportPortOrStation(origin: pickupText, destination: destinationText) {
+            baseFare += PricingRules.airportSurcharge
         }
+
+        return round(baseFare * 100) / 100
+    }
+
+    private func buildPricingEstimate(distanceKm: Double, duration: TimeInterval) -> PricingResponse {
+        let pricePerKm = PricingRules.pricePerKm(for: distanceKm)
+        let distanceFare = distanceKm * pricePerKm
+        var basePrice = distanceFare
+        basePrice = PricingRules.applyMinimums(to: basePrice, distanceKm: distanceKm)
+
+        let airportSurcharge = PricingRules.hasAirportPortOrStation(
+            origin: pickupText,
+            destination: destinationText
+        ) ? PricingRules.airportSurcharge : 0.0
+
+        let totalPrice = basePrice + airportSurcharge
+
+        return PricingResponse(
+            distance: round(distanceKm * 10) / 10,
+            estimatedTime: formatDuration(duration),
+            basePrice: round(basePrice * 100) / 100,
+            totalPrice: round(totalPrice * 100) / 100,
+            priceBreakdown: PriceBreakdown(
+                baseRate: round(basePrice * 100) / 100,
+                distanceRate: round(distanceFare * 100) / 100,
+                timeRate: 0,
+                additionalFees: airportSurcharge
+            )
+        )
     }
     
     private func formatAddress(from placemark: CLPlacemark) -> String {
@@ -354,6 +559,9 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
     
     // MARK: - Public Setters
     func setPickup(address: String, coordinate: CLLocationCoordinate2D) {
+        guard shouldAllowTripPlanningUpdates else {
+            return
+        }
         pickupText = address
         pickupCoordinate = coordinate
         updateMapRegion(to: coordinate)
@@ -361,6 +569,9 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
     }
     
     func setDestination(address: String, coordinate: CLLocationCoordinate2D) {
+        guard shouldAllowTripPlanningUpdates else {
+            return
+        }
         destinationText = address
         destinationCoordinate = coordinate
         updateMapRegion(to: coordinate)
@@ -368,6 +579,9 @@ final class SimpleRideViewModel: NSObject, ObservableObject {
     }
     
     func swapLocations() {
+        guard shouldAllowTripPlanningUpdates else {
+            return
+        }
         guard let pickup = pickupCoordinate, let destination = destinationCoordinate else { return }
         let pickupTextCopy = pickupText
         let destinationTextCopy = destinationText
@@ -400,7 +614,7 @@ extension SimpleRideViewModel: CLLocationManagerDelegate {
         updateMapRegion(to: location.coordinate)
         print("📍 Location updated: \(location.coordinate)")
         
-        if !hasInitializedPickup && pickupCoordinate == nil {
+        if shouldAllowTripPlanningUpdates && !hasInitializedPickup && pickupCoordinate == nil {
             hasInitializedPickup = true
             Task {
                 do {
@@ -451,30 +665,133 @@ extension SimpleRideViewModel: MKLocalSearchCompleterDelegate {
     }
     
     // MARK: - Trip Flow Methods
-    
-    func confirmTrip() {
+
+    func createPreviewTrip() {
+        print("🔵 createPreviewTrip() llamado")
         guard let pickup = pickupCoordinate,
-              let destination = destinationCoordinate else { return }
-        
+              let destination = destinationCoordinate else {
+            print("❌ Error: Coordenadas no disponibles para preview")
+            errorMessage = "Por favor, selecciona ubicación de recogida y destino"
+            return
+        }
+
+        print("✅ Creando preview de viaje...")
+
+        let pickupLocation = LocationInfo(
+            address: pickupText,
+            coordinate: pickup
+        )
+        let destinationLocation = LocationInfo(
+            address: destinationText,
+            coordinate: destination
+        )
+        let paymentMethod = PaymentMethodInfo(type: .cash)
+
+        // Create a temporary trip for preview
+        currentTrip = Trip(
+            id: UUID().uuidString,
+            userId: AuthServiceAPI.shared.currentUser?.id ?? "user",
+            status: .scheduled,
+            pickupLocation: pickupLocation,
+            destinationLocation: destinationLocation,
+            estimatedFare: pricingEstimate?.totalPrice ?? parseEstimatedFare(),
+            estimatedDistance: pricingEstimate?.distance ?? parseEstimatedDistance(),
+            estimatedDuration: parseEstimatedDuration(),
+            vehicleType: "Standard",
+            paymentMethod: paymentMethod,
+            createdAt: Date(),
+            scheduledAt: requestedServiceDate
+        )
+
+        print("✅ Preview de viaje creado")
+    }
+
+    func handleTripNotification(tripId: String) {
+        Task {
+            do {
+                let apiTrip = try await tripService.getTripDetails(id: tripId)
+                await MainActor.run {
+                    applyNotificationTrip(apiTrip)
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "No se pudo cargar el viaje"
+                }
+                print("❌ Error loading trip from notification: \(error)")
+            }
+        }
+    }
+
+    func refreshTripStatusIfNeeded() {
+        guard let tripId = currentTrip?.id else { return }
+
+        switch currentTripState {
+        case .searchingLocations, .readyToConfirm:
+            return
+        default:
+            break
+        }
+
+        tripRefreshTask?.cancel()
+        tripRefreshTask = Task { @MainActor in
+            do {
+                let apiTrip = try await tripService.getTripStatus(tripId: tripId)
+                applyNotificationTrip(apiTrip)
+            } catch {
+                print("❌ Error refreshing trip status: \(error)")
+            }
+        }
+    }
+
+    func resumeTripMonitoringIfNeeded() {
+        if currentTripState == .findingDriver {
+            startPollingForDriverAssignment()
+        } else {
+            tripPollingTask?.cancel()
+            tripPollingTask = nil
+        }
+    }
+
+    func confirmTrip() {
+        print("🔵 confirmTrip() llamado")
+        print("🔵 Pickup coordinate: \(String(describing: pickupCoordinate))")
+        print("🔵 Destination coordinate: \(String(describing: destinationCoordinate))")
+        print("🔵 Pickup text: \(pickupText)")
+        print("🔵 Destination text: \(destinationText)")
+
+        guard let pickup = pickupCoordinate,
+              let destination = destinationCoordinate else {
+            print("❌ Error: Coordenadas no disponibles")
+            errorMessage = "Por favor, selecciona ubicación de recogida y destino"
+            return
+        }
+
+        print("✅ Coordenadas válidas, iniciando creación de viaje...")
         currentTripState = .confirmingTrip
-        
-        // Simulate trip creation and driver assignment
+
+        // Real trip creation - wait for admin assignment
         Task {
             await MainActor.run {
                 currentTripState = .processingPayment
                 errorMessage = nil
             }
 
+            print("📤 Enviando solicitud de viaje al backend...")
+
             do {
                 let apiTrip = try await tripService.createTrip(
                     pickupLocation: pickupText.isEmpty ? nil : pickupText,
                     destination: destinationText,
-                    startDate: Date(),
+                    pickupCoordinate: pickup,
+                    destinationCoordinate: destination,
+                    startDate: requestedServiceDate,
                     notes: nil,
                     distanceKm: pricingEstimate?.distance ?? parseEstimatedDistance(),
                     basePrice: pricingEstimate?.basePrice,
                     totalPrice: pricingEstimate?.totalPrice ?? parseEstimatedFare()
                 )
+
+                print("✅ Viaje creado con ID: \(apiTrip.id)")
 
                 await MainActor.run {
                     let pickupLocation = LocationInfo(
@@ -488,52 +805,282 @@ extension SimpleRideViewModel: MKLocalSearchCompleterDelegate {
                     let paymentMethod = PaymentMethodInfo(type: .cash)
 
                     currentTrip = Trip(
+                        id: apiTrip.id,
                         userId: AuthServiceAPI.shared.currentUser?.id ?? "user",
+                        status: .requested,
                         pickupLocation: pickupLocation,
                         destinationLocation: destinationLocation,
                         estimatedFare: apiTrip.precioTotal ?? parseEstimatedFare(),
                         estimatedDistance: apiTrip.distanciaKm ?? parseEstimatedDistance(),
                         estimatedDuration: parseEstimatedDuration(),
                         vehicleType: "Standard",
-                        paymentMethod: paymentMethod
+                        paymentMethod: paymentMethod,
+                        createdAt: Date(),
+                        scheduledAt: requestedServiceDate
                     )
                 }
             } catch {
                 await MainActor.run {
-                    errorMessage = "Error al crear el viaje"
+                    errorMessage = "Error al crear el viaje: \(error.localizedDescription)"
                     currentTripState = .readyToConfirm
                 }
                 return
             }
 
+            // Move to finding driver state and wait for real assignment
             await MainActor.run {
                 currentTripState = .findingDriver
+                // NO simulation - real wait for admin to assign driver
+                print("✅ Viaje creado - esperando asignación del administrador")
+                startPollingForDriverAssignment()
             }
+        }
+    }
 
-            // Simulate finding driver
-            try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+    private func startPollingForDriverAssignment() {
+        guard tripPollingTask == nil else { return }
 
-            await MainActor.run {
-                // Create mock driver
-                let mockVehicle = VehicleInfo(
-                    make: "Tesla",
-                    model: "Model Y",
-                    year: 2023,
-                    color: "Blanco",
-                    licensePlate: "ABC1234",
-                    capacity: 4,
-                    vehicleType: .sedan
-                )
+        tripPollingTask = Task { @MainActor in
+            defer { tripPollingTask = nil }
 
-                assignedDriver = Driver(
-                    userId: "driver123",
-                    licenseNumber: "ES123456789",
-                    name: "Carlos Rodríguez",
-                    vehicleInfo: mockVehicle
-                )
+            // Poll every 5 seconds to check if a driver has been assigned
+            while currentTripState == .findingDriver && !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
 
-                currentTripState = .driverAssigned
+                guard let tripId = currentTrip?.id else { break }
+
+                // Check trip status from backend
+                do {
+                    let updatedTrip = try await tripService.getTripStatus(tripId: tripId)
+
+                    let normalizedStatus = updatedTrip.estado
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .uppercased()
+                    let hasDriver = (updatedTrip.conductorId?.isEmpty == false)
+                        || (updatedTrip.conductorNombre?.isEmpty == false)
+                    let assignedStatuses: Set<String> = [
+                        "ACEPTADO",
+                        "ASSIGNED",
+                        "ASIGNADO",
+                        "EN_CAMINO",
+                        "EN_RUTA",
+                        "EN_ROUTE"
+                    ]
+                    let cancelledStatuses: Set<String> = [
+                        "RECHAZADO",
+                        "CANCELADO",
+                        "EXPIRADO"
+                    ]
+
+                    if hasDriver || assignedStatuses.contains(normalizedStatus) {
+                        // Driver has been assigned!
+                        if assignedDriver == nil {
+                            handleDriverAssigned(
+                                driverId: updatedTrip.conductorId,
+                                driverName: updatedTrip.conductorNombre
+                            )
+                        }
+                    } else if cancelledStatuses.contains(normalizedStatus) {
+                        // Trip was rejected or cancelled
+                        if currentTripState != .cancelled {
+                            handleTripRejected(reason: normalizedStatus)
+                        }
+                    }
+                } catch {
+                    print("❌ Error checking trip status: \(error)")
+                }
             }
+        }
+    }
+
+    private func applyNotificationTrip(_ apiTrip: APITrip) {
+        let pickupAddress = apiTrip.lugarRecogida ?? "Recogida no especificada"
+        let destinationAddress = apiTrip.destino
+        let pickupCoordinate = coordinateFromAPI(lat: apiTrip.pickupLat, lng: apiTrip.pickupLng)
+        let destinationCoordinate = coordinateFromAPI(lat: apiTrip.destinationLat, lng: apiTrip.destinationLng)
+        let fallbackCoordinate = currentLocation?.coordinate ?? CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        let pickupLocation = LocationInfo(address: pickupAddress, coordinate: pickupCoordinate ?? fallbackCoordinate)
+        let destinationLocation = LocationInfo(address: destinationAddress, coordinate: destinationCoordinate ?? fallbackCoordinate)
+        let hasDriver = (apiTrip.conductorId?.isEmpty == false)
+            || (apiTrip.conductorNombre?.isEmpty == false)
+
+        pickupText = pickupAddress
+        destinationText = destinationAddress
+        self.pickupCoordinate = pickupCoordinate
+        self.destinationCoordinate = destinationCoordinate
+        routePolyline = nil
+        if let total = apiTrip.precioTotal {
+            estimatedFare = formatFare(total)
+        }
+        if let distance = apiTrip.distanciaKm {
+            estimatedDistance = String(format: "%.1f km", distance)
+        }
+        if let duration = apiTrip.duracion, !duration.isEmpty {
+            estimatedDuration = duration
+        }
+
+        if let pickupCoordinate = pickupCoordinate, let destinationCoordinate = destinationCoordinate {
+            updateMapRegionForRoute(pickup: pickupCoordinate, destination: destinationCoordinate)
+            Task { @MainActor in
+                if let route = try? await calculateRoute(from: pickupCoordinate, to: destinationCoordinate) {
+                    routePolyline = route.polyline
+                    estimatedDistance = String(format: "%.1f km", route.distance / 1000)
+                    estimatedDuration = formatDuration(route.expectedTravelTime)
+                }
+            }
+        } else if let pickupCoordinate = pickupCoordinate {
+            updateMapRegion(to: pickupCoordinate)
+        }
+
+        let status = tripStatusFromAPI(apiTrip.estado, hasDriver: hasDriver)
+        let paymentMethod = PaymentMethodInfo(
+            type: paymentType(from: apiTrip.paymentMethod),
+            displayName: apiTrip.paymentMethod
+        )
+
+        currentTrip = Trip(
+            id: apiTrip.id,
+            userId: AuthServiceAPI.shared.currentUser?.id ?? "user",
+            status: status,
+            pickupLocation: pickupLocation,
+            destinationLocation: destinationLocation,
+            estimatedFare: apiTrip.precioTotal ?? parseEstimatedFare(),
+            estimatedDistance: apiTrip.distanciaKm ?? parseEstimatedDistance(),
+            estimatedDuration: parseEstimatedDuration(),
+            vehicleType: "Standard",
+            paymentMethod: paymentMethod,
+            createdAt: apiTrip.createdAt.toDate() ?? Date(),
+            scheduledAt: apiTrip.fechaInicio.toDate() ?? requestedServiceDate
+        )
+
+        currentTripState = tripState(from: status, hasDriver: hasDriver)
+        resumeTripMonitoringIfNeeded()
+
+        if hasDriver {
+            assignedDriver = buildAssignedDriver(
+                driverId: apiTrip.conductorId,
+                driverName: apiTrip.conductorNombre
+            )
+        }
+    }
+
+    private func handleDriverAssigned(driverId: String?, driverName: String?) {
+        // Update with real driver information when assigned
+        currentTripState = .driverAssigned
+        currentTrip?.status = .driverAssigned
+        print("✅ Conductor asignado para el viaje")
+
+        let assigned = buildAssignedDriver(driverId: driverId, driverName: driverName)
+        assignedDriver = assigned
+
+        if shouldNotifyRideUpdates(), let trip = currentTrip {
+            NotificationService.shared.scheduleDriverAssignedNotification(for: trip, driver: assigned)
+        }
+    }
+
+    private func handleTripRejected(reason: String?) {
+        currentTripState = .cancelled
+        currentTrip?.status = .cancelled
+        errorMessage = "El viaje fue cancelado o rechazado por el administrador"
+
+        if shouldNotifyRideUpdates(), let trip = currentTrip {
+            let message = reason == "RECHAZADO"
+                ? "Tu viaje fue rechazado. Puedes solicitar otro cuando quieras."
+                : "Tu viaje fue cancelado. Puedes solicitar otro cuando quieras."
+            NotificationService.shared.scheduleTripCancelledNotification(for: trip, reason: message)
+        }
+    }
+
+    private func shouldNotifyRideUpdates() -> Bool {
+        guard let prefs = UserManager.shared.currentUser?.preferences.notifications else {
+            return false
+        }
+        return prefs.pushNotifications && prefs.rideUpdates
+    }
+
+    private func buildAssignedDriver(driverId: String?, driverName: String?) -> Driver {
+        let mockVehicle = VehicleInfo(
+            make: "Tesla",
+            model: "Model Y",
+            year: 2023,
+            color: "Blanco",
+            licensePlate: "ABC1234",
+            capacity: 4,
+            vehicleType: .sedan
+        )
+
+        var assigned = Driver(
+            userId: driverId ?? "driver123",
+            licenseNumber: "ES123456789",
+            name: driverName ?? "Conductor Asignado",
+            vehicleInfo: mockVehicle
+        )
+        assigned.rating = 4.8
+        assigned.totalTrips = 180
+        assigned.estimatedArrival = 8 * 60
+        assigned.isActive = true
+        assigned.isOnline = true
+
+        return assigned
+    }
+
+    private func coordinateFromAPI(lat: Double?, lng: Double?) -> CLLocationCoordinate2D? {
+        guard let lat = lat, let lng = lng else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    }
+
+    private func paymentType(from method: String?) -> PaymentType {
+        switch method?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "APPLE_PAY":
+            return .applePay
+        case "CASH", "EFECTIVO":
+            return .cash
+        default:
+            return .creditCard
+        }
+    }
+
+    private func tripStatusFromAPI(_ estado: String, hasDriver: Bool) -> TripStatus {
+        let normalized = estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
+        switch normalized {
+        case "ACEPTADO", "ASSIGNED", "ASIGNADO":
+            return .driverAssigned
+        case "EN_CAMINO", "EN_RUTA", "EN_ROUTE":
+            return .driverEnRoute
+        case "LLEGADO", "ARRIVED":
+            return .driverArrived
+        case "EN_CURSO", "IN_PROGRESS", "EN_PROGRESO":
+            return .inProgress
+        case "COMPLETADO", "FINALIZADO":
+            return .completed
+        case "CANCELADO", "RECHAZADO", "EXPIRADO":
+            return .cancelled
+        case "PENDIENTE", "REQUESTED":
+            return .requested
+        default:
+            return hasDriver ? .driverAssigned : .requested
+        }
+    }
+
+    private func tripState(from status: TripStatus, hasDriver: Bool) -> TripState {
+        switch status {
+        case .driverAssigned:
+            return .driverAssigned
+        case .driverEnRoute:
+            return .driverEnRoute
+        case .driverArrived:
+            return .driverArrived
+        case .inProgress:
+            return .inProgress
+        case .completed:
+            return .completed
+        case .cancelled, .failed:
+            return .cancelled
+        case .requested:
+            return hasDriver ? .driverAssigned : .findingDriver
+        case .scheduled:
+            return .readyToConfirm
         }
     }
     
@@ -587,7 +1134,8 @@ extension SimpleRideViewModel: MKLocalSearchCompleterDelegate {
             estimatedDistance: parseEstimatedDistance(),
             estimatedDuration: parseEstimatedDuration(),
             vehicleType: "Standard",
-            paymentMethod: paymentMethod
+            paymentMethod: paymentMethod,
+            scheduledAt: requestedServiceDate
         )
     }
 }
@@ -604,7 +1152,7 @@ enum TripState {
     case inProgress
     case completed
     case cancelled
-    
+
     var displayName: String {
         switch self {
         case .searchingLocations:
@@ -631,4 +1179,9 @@ enum TripState {
             return "Viaje cancelado"
         }
     }
+}
+
+private struct ActiveTripSnapshot: Codable {
+    let trip: Trip
+    let driver: Driver?
 }

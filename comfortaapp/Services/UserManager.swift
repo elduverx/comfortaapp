@@ -130,6 +130,8 @@ class UserManager: ObservableObject {
         user.totalTrips += 1
         currentUser = user
         saveCurrentUser()
+
+        PushNotificationService.shared.registerSavedTokenIfNeeded()
     }
     
     func addSpentAmount(_ amount: Double) {
@@ -139,6 +141,10 @@ class UserManager: ObservableObject {
         user.loyaltyPoints += Int(amount * 10) // 10 points per euro
         currentUser = user
         saveCurrentUser()
+
+        if isAuthenticated {
+            PushNotificationService.shared.registerSavedTokenIfNeeded()
+        }
     }
     
     func updateUserRating(_ newRating: Double, totalRatings: Int) {
@@ -310,6 +316,17 @@ class UserManager: ObservableObject {
         
         // Clear trip history
         UserDefaults.standard.removeObject(forKey: "trip_history")
+
+        // Clear API trip cache
+        UserDefaults.standard.removeObject(forKey: "trip_history_api_v1")
+        UserDefaults.standard.removeObject(forKey: "active_trip_api_v1")
+
+        // Clear active trip snapshot
+        UserDefaults.standard.removeObject(forKey: "active_trip_snapshot_v1")
+
+        // Clear admin cache
+        UserDefaults.standard.removeObject(forKey: "admin_trip_snapshots_v1")
+        UserDefaults.standard.removeObject(forKey: "admin_user_snapshots_v1")
     }
 }
 

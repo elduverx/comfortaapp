@@ -23,6 +23,41 @@ extension MKCoordinateRegion {
         
         self.init(center: center, span: span)
     }
+
+    static func regionToFit(
+        coordinates: [CLLocationCoordinate2D],
+        paddingFactor: Double = 1.3,
+        minimumSpan: Double = 0.01
+    ) -> MKCoordinateRegion {
+        guard let first = coordinates.first else {
+            return MKCoordinateRegion()
+        }
+
+        var minLat = first.latitude
+        var maxLat = first.latitude
+        var minLon = first.longitude
+        var maxLon = first.longitude
+
+        for coordinate in coordinates.dropFirst() {
+            minLat = min(minLat, coordinate.latitude)
+            maxLat = max(maxLat, coordinate.latitude)
+            minLon = min(minLon, coordinate.longitude)
+            maxLon = max(maxLon, coordinate.longitude)
+        }
+
+        let center = CLLocationCoordinate2D(
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLon + maxLon) / 2
+        )
+
+        let latitudeDelta = max((maxLat - minLat) * paddingFactor, minimumSpan)
+        let longitudeDelta = max((maxLon - minLon) * paddingFactor, minimumSpan)
+
+        return MKCoordinateRegion(
+            center: center,
+            span: MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta)
+        )
+    }
 }
 
 extension MKPolyline {
@@ -30,6 +65,24 @@ extension MKPolyline {
         var coordinates = [CLLocationCoordinate2D](repeating: CLLocationCoordinate2D(), count: pointCount)
         getCoordinates(&coordinates, range: NSRange(location: 0, length: pointCount))
         return coordinates
+    }
+}
+
+extension MKMapRect {
+    func padded(by scale: Double, minimumSize: Double = 2000) -> MKMapRect {
+        let safeScale = max(scale, 1.0)
+        let width = max(size.width, minimumSize)
+        let height = max(size.height, minimumSize)
+        let baseRect = MKMapRect(
+            x: midX - width / 2,
+            y: midY - height / 2,
+            width: width,
+            height: height
+        )
+
+        let dx = baseRect.size.width * (safeScale - 1) / 2
+        let dy = baseRect.size.height * (safeScale - 1) / 2
+        return baseRect.insetBy(dx: -dx, dy: -dy)
     }
 }
 

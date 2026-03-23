@@ -191,8 +191,12 @@ struct CompactSearchBar: View {
             .padding(.vertical, 14)
             .background(
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.white)
-                    .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 4)
+                    .fill(ComfortaDesign.Colors.surfaceSecondary)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(ComfortaDesign.Colors.glassBorder, lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 6)
             )
         }
         .buttonStyle(PlainButtonStyle())

@@ -8,6 +8,7 @@
 
 /* Begin PBXFileReference section */
 		859B159C2EEE090E009BE3A4 /* Comforta.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Comforta.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C41A0F64C1C24DBE92E3F298 /* ComfortaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ComfortaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -17,6 +18,13 @@
 				Info.plist,
 			);
 			target = 859B159B2EEE090E009BE3A4 /* Comforta */;
+		};
+		B23CCA1CC42E4F158D55C122 /* Exceptions for "comfortaappTests" folder in "ComfortaTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 211C0C4892EA4F5B9EBCC81B /* ComfortaTests */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -29,10 +37,25 @@
 			path = comfortaapp;
 			sourceTree = "<group>";
 		};
+		65A5201156374FC0B3F78CC1 /* comfortaappTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B23CCA1CC42E4F158D55C122 /* Exceptions for "comfortaappTests" folder in "ComfortaTests" target */,
+			);
+			path = comfortaappTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		859B15992EEE090E009BE3A4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CC7505E25BE2414289B3224D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -46,6 +69,7 @@
 			isa = PBXGroup;
 			children = (
 				859B159E2EEE090E009BE3A4 /* comfortaapp */,
+				65A5201156374FC0B3F78CC1 /* comfortaappTests */,
 				859B159D2EEE090E009BE3A4 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -54,6 +78,7 @@
 			isa = PBXGroup;
 			children = (
 				859B159C2EEE090E009BE3A4 /* Comforta.app */,
+				C41A0F64C1C24DBE92E3F298 /* ComfortaTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -83,6 +108,28 @@
 			productReference = 859B159C2EEE090E009BE3A4 /* Comforta.app */;
 			productType = "com.apple.product-type.application";
 		};
+		211C0C4892EA4F5B9EBCC81B /* ComfortaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 57BB098443C443EB8B3075B1 /* Build configuration list for PBXNativeTarget "ComfortaTests" */;
+			buildPhases = (
+				2F5A0E29E2404B4B8C64A454 /* Sources */,
+				CC7505E25BE2414289B3224D /* Frameworks */,
+				37191EC0FB4A414DB113895C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				65A5201156374FC0B3F78CC1 /* comfortaappTests */,
+			);
+			name = ComfortaTests;
+			packageProductDependencies = (
+			);
+			productName = ComfortaTests;
+			productReference = C41A0F64C1C24DBE92E3F298 /* ComfortaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -103,6 +150,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				es,
 				Base,
 			);
 			mainGroup = 859B15932EEE090E009BE3A4;
@@ -113,6 +161,7 @@
 			projectRoot = "";
 			targets = (
 				859B159B2EEE090E009BE3A4 /* Comforta */,
+				211C0C4892EA4F5B9EBCC81B /* ComfortaTests */,
 			);
 		};
 /* End PBXProject section */
@@ -125,10 +174,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		37191EC0FB4A414DB113895C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		859B15982EEE090E009BE3A4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2F5A0E29E2404B4B8C64A454 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -342,6 +405,44 @@
 			};
 			name = Release;
 		};
+		24D601AB053747F991A9A2C3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = comfortaappTests/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.elduverx.comfortaapp.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Comforta.app/Comforta";
+			};
+			name = Debug;
+		};
+		208AE7648A784EAAA9112AD4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = comfortaappTests/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.elduverx.comfortaapp.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Comforta.app/Comforta";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -359,6 +460,15 @@
 			buildConfigurations = (
 				859B15A82EEE090F009BE3A4 /* Debug */,
 				859B15A92EEE090F009BE3A4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		57BB098443C443EB8B3075B1 /* Build configuration list for PBXNativeTarget "ComfortaTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				24D601AB053747F991A9A2C3 /* Debug */,
+				208AE7648A784EAAA9112AD4 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

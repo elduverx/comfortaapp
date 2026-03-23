@@ -8,16 +8,47 @@ struct ComfortaDesign {
     // MARK: - Colors
     
     struct Colors {
+        private static func rgba(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat, _ alpha: CGFloat = 1.0) -> UIColor {
+            UIColor(red: red, green: green, blue: blue, alpha: alpha)
+        }
+
+        private static func dynamicColor(light: UIColor, dark: UIColor) -> Color {
+            Color(UIColor { traits in
+                traits.userInterfaceStyle == .dark ? dark : light
+            })
+        }
+
         // Primary Brand Colors (blanco, negro y dorado)
-        static let primaryGreen = Color(red: 0.84, green: 0.73, blue: 0.33) // Dorado principal
-        static let darkGreen = Color(red: 0.66, green: 0.52, blue: 0.18) // Dorado profundo
-        static let lightGreen = Color(red: 0.95, green: 0.89, blue: 0.69) // Brillo dorado
+        static let primaryGreen = dynamicColor(
+            light: rgba(0.66, 0.52, 0.18),
+            dark: rgba(0.84, 0.73, 0.33)
+        ) // Dorado principal
+        static let darkGreen = dynamicColor(
+            light: rgba(0.54, 0.42, 0.14),
+            dark: rgba(0.66, 0.52, 0.18)
+        ) // Dorado profundo
+        static let lightGreen = dynamicColor(
+            light: rgba(0.97, 0.92, 0.78),
+            dark: rgba(0.95, 0.89, 0.69)
+        ) // Brillo dorado
         
         // Premium Glass Colors
-        static let glassBackground = Color.white.opacity(0.08)
-        static let glassBorder = Color.white.opacity(0.2)
-        static let glassHighlight = Color(red: 0.95, green: 0.88, blue: 0.72)
-        static let glassShadow = Color.black.opacity(0.35)
+        static let glassBackground = dynamicColor(
+            light: rgba(1.0, 1.0, 1.0, 0.75),
+            dark: rgba(1.0, 1.0, 1.0, 0.08)
+        )
+        static let glassBorder = dynamicColor(
+            light: rgba(0.0, 0.0, 0.0, 0.08),
+            dark: rgba(1.0, 1.0, 1.0, 0.2)
+        )
+        static let glassHighlight = dynamicColor(
+            light: rgba(0.99, 0.95, 0.86),
+            dark: rgba(0.95, 0.88, 0.72)
+        )
+        static let glassShadow = dynamicColor(
+            light: rgba(0.0, 0.0, 0.0, 0.12),
+            dark: rgba(0.0, 0.0, 0.0, 0.35)
+        )
         
         // Semantic Colors
         static let success = primaryGreen
@@ -27,18 +58,39 @@ struct ComfortaDesign {
         static let info = Color(red: 0.6, green: 0.7, blue: 0.9)
         
         // Neutral Colors
-        static let background = Color(red: 0.05, green: 0.05, blue: 0.06)
-        static let surface = Color(red: 0.12, green: 0.12, blue: 0.14)
-        static let surfaceSecondary = Color(red: 0.09, green: 0.09, blue: 0.11)
+        static let background = dynamicColor(
+            light: rgba(0.97, 0.96, 0.94),
+            dark: rgba(0.05, 0.05, 0.06)
+        )
+        static let surface = dynamicColor(
+            light: rgba(0.99, 0.98, 0.96),
+            dark: rgba(0.12, 0.12, 0.14)
+        )
+        static let surfaceSecondary = dynamicColor(
+            light: rgba(0.94, 0.93, 0.90),
+            dark: rgba(0.09, 0.09, 0.11)
+        )
         
         // Text Colors
-        static let textPrimary = Color.white
-        static let textSecondary = Color.white.opacity(0.75)
-        static let textTertiary = Color.white.opacity(0.55)
+        static let textPrimary = dynamicColor(
+            light: rgba(0.12, 0.12, 0.12),
+            dark: rgba(1.0, 1.0, 1.0)
+        )
+        static let textSecondary = dynamicColor(
+            light: rgba(0.30, 0.30, 0.30),
+            dark: rgba(1.0, 1.0, 1.0, 0.75)
+        )
+        static let textTertiary = dynamicColor(
+            light: rgba(0.45, 0.45, 0.45),
+            dark: rgba(1.0, 1.0, 1.0, 0.55)
+        )
         
         // Map Colors
         static let pickupMarker = primaryGreen
-        static let destinationMarker = Color.white
+        static let destinationMarker = dynamicColor(
+            light: rgba(0.12, 0.12, 0.12),
+            dark: rgba(1.0, 1.0, 1.0)
+        )
         static let routeLine = primaryGreen
     }
     
@@ -49,6 +101,7 @@ struct ComfortaDesign {
         static let title1 = Font.system(size: 28, weight: .bold, design: .rounded)
         static let title2 = Font.system(size: 24, weight: .semibold, design: .rounded)
         static let title3 = Font.system(size: 20, weight: .semibold, design: .rounded)
+        static let headline = Font.system(size: 18, weight: .semibold, design: .rounded)
         
         static let body1 = Font.system(size: 16, weight: .medium, design: .default)
         static let body2 = Font.system(size: 14, weight: .regular, design: .default)

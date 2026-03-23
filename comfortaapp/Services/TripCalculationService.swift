@@ -3,22 +3,22 @@ import CoreLocation
 import MapKit
 
 public final class TripCalculationService {
-    
-    private let baseRate: Double = 1.50 // €1.50 per km
-    private let longDistanceRate: Double = 1.10 // €1.10 per km for distances > 100km
-    private let longDistanceThreshold: Double = 100 // km
-    
+
     public init() {}
-    
-    public func calculateTrip(from pickup: LocationPoint, to destination: LocationPoint) async throws -> Trip {
+
+    public func calculateTrip(from pickup: LocationPoint, to destination: LocationPoint, includesAirport: Bool = false) async throws -> Trip {
         let distanceMeters = calculateDistance(from: pickup.coordinate, to: destination.coordinate)
-        let fare = calculateFare(for: distanceMeters)
+        let includesAirportHub = includesAirport || PricingRules.hasAirportPortOrStation(
+            origin: pickup.address,
+            destination: destination.address
+        )
+        let fare = calculateFare(for: distanceMeters, includesAirport: includesAirportHub)
         let duration = try await estimateRouteTime(from: pickup, to: destination)
-        
+
         let pickupInfo = LocationInfo(address: pickup.address, coordinate: pickup.coordinate)
         let destinationInfo = LocationInfo(address: destination.address, coordinate: destination.coordinate)
         let payment = PaymentMethodInfo(type: .cash, currency: "EUR", displayName: "Efectivo", isDefault: true)
-        
+
         return Trip(
             userId: UserManager.shared.currentUser?.id ?? "",
             pickupLocation: pickupInfo,
@@ -32,27 +32,35 @@ public final class TripCalculationService {
             scheduledAt: nil
         )
     }
-    
+
     func calculateDistance(from pickup: CLLocationCoordinate2D, to destination: CLLocationCoordinate2D) -> Double {
         let pickupLocation = CLLocation(latitude: pickup.latitude, longitude: pickup.longitude)
         let destinationLocation = CLLocation(latitude: destination.latitude, longitude: destination.longitude)
-        
+
         return pickupLocation.distance(from: destinationLocation)
     }
-    
-    func calculateFare(for distance: Double) -> Double {
+
+    /// Calcula la tarifa según la nueva formula de precios Comforta
+    /// - Precio por km segun distancia: <50km 1.50, 50-100km 1.20, >100km 1.10
+    /// - Minimo absoluto: 7.50
+    /// - Minimo para viajes >= 10km: 15
+    /// - Recargo aeropuerto/puerto/estacion: +8
+    func calculateFare(for distance: Double, includesAirport: Bool = false) -> Double {
         let distanceKm = distance / 1000
-        
-        guard distanceKm > 0 else { return 0 }
-        
-        if distanceKm <= longDistanceThreshold {
-            return distanceKm * baseRate
-        } else {
-            let baseAmount = longDistanceThreshold * baseRate
-            let extraDistance = distanceKm - longDistanceThreshold
-            let extraAmount = extraDistance * longDistanceRate
-            return baseAmount + extraAmount
+
+        guard distanceKm > 0 else { return PricingRules.minimumFare }
+
+        let pricePerKm = PricingRules.pricePerKm(for: distanceKm)
+        var fare = distanceKm * pricePerKm
+        fare = PricingRules.applyMinimums(to: fare, distanceKm: distanceKm)
+
+        // Agregar recargo de aeropuerto si aplica
+        if includesAirport {
+            fare += PricingRules.airportSurcharge
         }
+
+        // Redondear a 2 decimales
+        return round(fare * 100) / 100
     }
     
     func estimateRouteTime(from pickup: LocationPoint, to destination: LocationPoint) async throws -> TimeInterval {

@@ -99,27 +99,11 @@ final class RideFlowViewModel: ObservableObject {
     
     // MARK: - Private Methods
     private func setupMapRegion() {
-        // Calculate region to show both pickup and destination
-        let coordinates = [tripData.pickupCoordinate, tripData.destinationCoordinate]
-        let lats = coordinates.map { $0.latitude }
-        let lons = coordinates.map { $0.longitude }
-        
-        let minLat = lats.min()!
-        let maxLat = lats.max()!
-        let minLon = lons.min()!
-        let maxLon = lons.max()!
-        
-        let center = CLLocationCoordinate2D(
-            latitude: (minLat + maxLat) / 2,
-            longitude: (minLon + maxLon) / 2
+        mapRegion = MKCoordinateRegion.regionToFit(
+            coordinates: [tripData.pickupCoordinate, tripData.destinationCoordinate],
+            paddingFactor: 1.35,
+            minimumSpan: 0.01
         )
-        
-        let span = MKCoordinateSpan(
-            latitudeDelta: max((maxLat - minLat) * 1.3, 0.01),
-            longitudeDelta: max((maxLon - minLon) * 1.3, 0.01)
-        )
-        
-        mapRegion = MKCoordinateRegion(center: center, span: span)
     }
     
     private func simulateTripProgress() {

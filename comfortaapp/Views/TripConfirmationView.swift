@@ -39,6 +39,13 @@ struct TripConfirmationView: View {
                         value: trip.destinationLocation.address,
                         iconColor: ComfortaDesign.Colors.error
                     )
+
+                    TripDetailRow(
+                        icon: "calendar",
+                        label: "Hora del servicio",
+                        value: serviceTimeText,
+                        iconColor: ComfortaDesign.Colors.textSecondary
+                    )
                     
                     TripDetailRow(
                         icon: "ruler",
@@ -158,6 +165,31 @@ struct TripDetailRow: View {
                 .foregroundColor(ComfortaDesign.Colors.textPrimary)
                 .lineLimit(2)
         }
+    }
+}
+
+private extension TripConfirmationView {
+    var serviceTimeText: String {
+        guard let date = trip.scheduledAt else { return "Ahora" }
+        return formattedServiceTime(for: date)
+    }
+
+    func formattedServiceTime(for date: Date) -> String {
+        let calendar = Calendar.current
+        let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale.current
+        timeFormatter.timeStyle = .short
+        timeFormatter.dateStyle = .none
+
+        if calendar.isDateInToday(date) {
+            return "Hoy, \(timeFormatter.string(from: date))"
+        }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale.current
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .short
+        return dateFormatter.string(from: date)
     }
 }
 

@@ -166,37 +166,44 @@ struct TabBarButton: View {
 
 enum TabBarItem: String, CaseIterable {
     case map = "map"
-    case trips = "trips" 
+    case trips = "trips"
+    case benefits = "benefits"
     case profile = "profile"
-    
+
     var title: String {
         switch self {
         case .map:
             return "Mapa"
         case .trips:
             return "Viajes"
+        case .benefits:
+            return "Beneficios"
         case .profile:
             return "Perfil"
         }
     }
-    
+
     var icon: String {
         switch self {
         case .map:
             return "map"
         case .trips:
             return "car.circle"
+        case .benefits:
+            return "star.circle"
         case .profile:
             return "person.circle"
         }
     }
-    
+
     var selectedIcon: String {
         switch self {
         case .map:
             return "map.fill"
         case .trips:
             return "car.circle.fill"
+        case .benefits:
+            return "star.circle.fill"
         case .profile:
             return "person.circle.fill"
         }

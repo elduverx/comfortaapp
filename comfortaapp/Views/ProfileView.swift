@@ -5,6 +5,10 @@ struct ProfileView: View {
     @State private var showingSettings = false
     @State private var showingSupport = false
     @State private var showingPaymentMethods = false
+    @State private var showingEditProfile = false
+    @State private var showingStats = false
+    @State private var showingNotifications = false
+    @State private var showingSignOutConfirm = false
     @State private var isViewReady = false
     @State private var selectedProfileTab = 0
 
@@ -16,17 +20,11 @@ struct ProfileView: View {
                 }
                 .tag(0)
 
-            benefitsTab
-                .tabItem {
-                    Label("Beneficios", systemImage: "star.fill")
-                }
-                .tag(1)
-
             supportTab
                 .tabItem {
                     Label("Soporte", systemImage: "questionmark.circle.fill")
                 }
-                .tag(2)
+                .tag(1)
         }
         .accentColor(ComfortaDesign.Colors.primaryGreen)
         .onAppear {
@@ -40,6 +38,23 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showingPaymentMethods) {
             PaymentMethodsView()
+        }
+        .sheet(isPresented: $showingEditProfile) {
+            EditProfileView()
+        }
+        .sheet(isPresented: $showingStats) {
+            ProfileStatsView()
+        }
+        .sheet(isPresented: $showingNotifications) {
+            NotificationsView()
+        }
+        .alert("Cerrar sesión", isPresented: $showingSignOutConfirm) {
+            Button("Cancelar", role: .cancel) {}
+            Button("Cerrar sesión", role: .destructive) {
+                userManager.signOut()
+            }
+        } message: {
+            Text("¿Seguro que quieres cerrar sesión?")
         }
     }
 
@@ -66,20 +81,7 @@ struct ProfileView: View {
             .padding(.top, ComfortaDesign.Spacing.sm)
         }
     }
-    
-    private var benefitsTab: some View {
-        ScrollView {
-            LazyVStack(spacing: ComfortaDesign.Spacing.lg) {
-                loyaltyStatusSection
-                rewardsPerksSection
-                achievementsSection
-                referralRewardsSection
-            }
-            .padding(.horizontal, ComfortaDesign.Spacing.lg)
-            .padding(.top, ComfortaDesign.Spacing.sm)
-        }
-    }
-    
+
     private var supportTab: some View {
         ScrollView {
             LazyVStack(spacing: ComfortaDesign.Spacing.lg) {
@@ -141,6 +143,10 @@ struct ProfileView: View {
                                 .foregroundColor(ComfortaDesign.Colors.textSecondary)
                         }
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        showingEditProfile = true
+                    }
                     
                     Spacer()
                 }
@@ -149,7 +155,7 @@ struct ProfileView: View {
                 
                 // Edit Profile Button
                 Button(action: {
-                    // Edit profile action
+                    showingEditProfile = true
                 }) {
                     HStack {
                         Image(systemName: "person.crop.circle")
@@ -172,43 +178,54 @@ struct ProfileView: View {
     }
     
     private var quickStatsSection: some View {
-        ModernCard(style: .glass) {
-            VStack(alignment: .leading, spacing: ComfortaDesign.Spacing.md) {
-                Text("Estadísticas")
-                    .font(ComfortaDesign.Typography.title3)
-                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
-                
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: ComfortaDesign.Spacing.md) {
-                    StatItem(
-                        icon: "car.fill",
-                        title: "Viajes",
-                        value: "\(totalTrips)",
-                        color: ComfortaDesign.Colors.primaryGreen
-                    )
+        Button(action: {
+            showingStats = true
+        }) {
+            ModernCard(style: .glass) {
+                VStack(alignment: .leading, spacing: ComfortaDesign.Spacing.md) {
+                    HStack {
+                        Text("Estadísticas")
+                            .font(ComfortaDesign.Typography.title3)
+                            .foregroundColor(ComfortaDesign.Colors.textPrimary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(ComfortaDesign.Colors.textTertiary)
+                    }
                     
-                    StatItem(
-                        icon: "eurosign.circle.fill",
-                        title: "Gastado",
-                        value: totalSpent,
-                        color: ComfortaDesign.Colors.accent
-                    )
-                    
-                    StatItem(
-                        icon: "clock.fill",
-                        title: "Tiempo",
-                        value: totalTime,
-                        color: ComfortaDesign.Colors.warning
-                    )
-                    
-                    StatItem(
-                        icon: "star.fill",
-                        title: "Puntos",
-                        value: "\(loyaltyPoints)",
-                        color: .yellow
-                    )
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: ComfortaDesign.Spacing.md) {
+                        StatItem(
+                            icon: "car.fill",
+                            title: "Viajes",
+                            value: "\(totalTrips)",
+                            color: ComfortaDesign.Colors.primaryGreen
+                        )
+                        
+                        StatItem(
+                            icon: "eurosign.circle.fill",
+                            title: "Gastado",
+                            value: totalSpent,
+                            color: ComfortaDesign.Colors.accent
+                        )
+                        
+                        StatItem(
+                            icon: "clock.fill",
+                            title: "Tiempo",
+                            value: totalTime,
+                            color: ComfortaDesign.Colors.warning
+                        )
+                        
+                        StatItem(
+                            icon: "star.fill",
+                            title: "Puntos",
+                            value: "\(loyaltyPoints)",
+                            color: .yellow
+                        )
+                    }
                 }
             }
         }
+        .buttonStyle(PlainButtonStyle())
     }
     
     private var menuSection: some View {
@@ -226,7 +243,7 @@ struct ProfileView: View {
                 title: "Notificaciones",
                 subtitle: "Preferencias de alertas",
                 color: ComfortaDesign.Colors.accent,
-                action: { showingSettings = true }
+                action: { showingNotifications = true }
             )
             
             MenuCard(
@@ -251,103 +268,9 @@ struct ProfileView: View {
                 subtitle: "Salir de la aplicación",
                 color: ComfortaDesign.Colors.error,
                 action: {
-                    userManager.signOut()
+                    showingSignOutConfirm = true
                 }
             )
-        }
-    }
-    
-    private var loyaltyStatusSection: some View {
-        ModernCard(style: .glass) {
-            VStack(alignment: .leading, spacing: ComfortaDesign.Spacing.md) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Programa Comforta Rewards")
-                            .font(ComfortaDesign.Typography.title3)
-                            .foregroundColor(ComfortaDesign.Colors.textPrimary)
-                        Text("Nivel actual: \(loyaltyTier)")
-                            .font(ComfortaDesign.Typography.body2)
-                            .foregroundColor(ComfortaDesign.Colors.textSecondary)
-                    }
-                    Spacer()
-                    StatusPill(text: "\(loyaltyPoints) pts", color: ComfortaDesign.Colors.primaryGreen)
-                }
-                
-                VStack(alignment: .leading, spacing: 6) {
-                    ProgressView(value: loyaltyProgress)
-                        .tint(ComfortaDesign.Colors.primaryGreen)
-                        .scaleEffect(x: 1, y: 2, anchor: .center)
-                    Text("\(Int(loyaltyProgress * 1000))/1000 para subir de nivel")
-                        .font(ComfortaDesign.Typography.caption1)
-                        .foregroundColor(ComfortaDesign.Colors.textSecondary)
-                }
-            }
-        }
-    }
-    
-    private var rewardsPerksSection: some View {
-        ModernCard(style: .surface) {
-            VStack(alignment: .leading, spacing: ComfortaDesign.Spacing.md) {
-                Text("Beneficios Disponibles")
-                    .font(ComfortaDesign.Typography.title3)
-                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
-                
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: ComfortaDesign.Spacing.md) {
-                    BenefitTile(icon: "sparkles", title: "10% OFF", subtitle: "Viajes premium")
-                    BenefitTile(icon: "cup.and.saucer.fill", title: "Lounge", subtitle: "Acceso Comforta Club")
-                    BenefitTile(icon: "creditcard", title: "+150 pts", subtitle: "Cada 5 viajes")
-                    BenefitTile(icon: "gift.fill", title: "Invita y gana", subtitle: "€5 por amigo")
-                }
-            }
-        }
-    }
-    
-    private var achievementsSection: some View {
-        ModernCard(style: .glass) {
-            VStack(alignment: .leading, spacing: ComfortaDesign.Spacing.md) {
-                Text("Logros desbloqueados")
-                    .font(ComfortaDesign.Typography.title3)
-                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
-                
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: ComfortaDesign.Spacing.md) {
-                        ForEach(profileAchievements) { achievement in
-                            AchievementBadge(achievement: achievement)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    private var referralRewardsSection: some View {
-        ModernCard(style: .glass) {
-            VStack(alignment: .leading, spacing: ComfortaDesign.Spacing.md) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Comparte Comforta")
-                            .font(ComfortaDesign.Typography.title3)
-                            .foregroundColor(ComfortaDesign.Colors.textPrimary)
-                        Text("Obtén créditos por cada amigo que reserve un viaje")
-                            .font(ComfortaDesign.Typography.body2)
-                            .foregroundColor(ComfortaDesign.Colors.textSecondary)
-                    }
-                    Spacer()
-                    StatusPill(text: "Código: CF-\(userInitials)", color: ComfortaDesign.Colors.accent)
-                }
-                
-                Button(action: {}) {
-                    HStack {
-                        Image(systemName: "square.and.arrow.up")
-                        Text("Compartir enlace")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                    }
-                    .foregroundColor(ComfortaDesign.Colors.primaryGreen)
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
         }
     }
     
@@ -489,31 +412,11 @@ struct ProfileView: View {
         // Placeholder - would calculate from trip history
         return "24h"
     }
-    
+
     private var loyaltyPoints: Int {
         userManager.currentUser?.loyaltyPoints ?? 0
     }
-    
-    private var loyaltyTier: String {
-        switch loyaltyPoints {
-        case 0..<300: return "Classic"
-        case 300..<700: return "Gold"
-        default: return "Elite"
-        }
-    }
-    
-    private var loyaltyProgress: Double {
-        min(Double(loyaltyPoints % 1000) / 1000.0, 1.0)
-    }
-    
-    private var profileAchievements: [ProfileAchievement] {
-        [
-            ProfileAchievement(title: "Explorador", subtitle: "10 ciudades", icon: "globe.europe.africa.fill", color: ComfortaDesign.Colors.accent),
-            ProfileAchievement(title: "Noches Premium", subtitle: "20 viajes nocturnos", icon: "moon.stars.fill", color: ComfortaDesign.Colors.warning),
-            ProfileAchievement(title: "Eco Lover", subtitle: "5 viajes eléctricos", icon: "leaf.fill", color: ComfortaDesign.Colors.primaryGreen)
-        ]
-    }
-    
+
     private var supportFAQs: [SupportFAQ] {
         [
             SupportFAQ(question: "¿Cómo modifico un viaje programado?", answer: "Desde tus viajes activos, selecciona 'Editar viaje' y ajusta la hora o dirección."),
@@ -553,58 +456,6 @@ struct StatItem: View {
             RoundedRectangle(cornerRadius: ComfortaDesign.Radius.sm)
                 .fill(ComfortaDesign.Colors.surfaceSecondary)
         )
-    }
-}
-
-struct BenefitTile: View {
-    let icon: String
-    let title: String
-    let subtitle: String
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: ComfortaDesign.Spacing.xs) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundColor(ComfortaDesign.Colors.primaryGreen)
-                .padding(10)
-                .background(Circle().fill(ComfortaDesign.Colors.surfaceSecondary))
-            
-            Text(title)
-                .font(ComfortaDesign.Typography.body1)
-                .foregroundColor(ComfortaDesign.Colors.textPrimary)
-            Text(subtitle)
-                .font(ComfortaDesign.Typography.caption1)
-                .foregroundColor(ComfortaDesign.Colors.textSecondary)
-        }
-        .padding(ComfortaDesign.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: ComfortaDesign.Radius.md)
-                .fill(ComfortaDesign.Colors.surfaceSecondary)
-        )
-    }
-}
-
-struct AchievementBadge: View {
-    let achievement: ProfileAchievement
-    
-    var body: some View {
-        VStack(spacing: ComfortaDesign.Spacing.xs) {
-            Circle()
-                .fill(achievement.color.opacity(0.2))
-                .frame(width: 70, height: 70)
-                .overlay(
-                    Image(systemName: achievement.icon)
-                        .font(.title2)
-                        .foregroundColor(achievement.color)
-                )
-            Text(achievement.title)
-                .font(ComfortaDesign.Typography.caption1)
-                .foregroundColor(ComfortaDesign.Colors.textPrimary)
-            Text(achievement.subtitle)
-                .font(ComfortaDesign.Typography.caption2)
-                .foregroundColor(ComfortaDesign.Colors.textSecondary)
-        }
-        .frame(width: 120)
     }
 }
 
@@ -676,14 +527,6 @@ struct SupportFAQRow: View {
     }
 }
 
-struct ProfileAchievement: Identifiable {
-    let id = UUID()
-    let title: String
-    let subtitle: String
-    let icon: String
-    let color: Color
-}
-
 struct SupportFAQ: Identifiable {
     let id = UUID()
     let question: String
@@ -735,54 +578,712 @@ struct MenuCard: View {
     }
 }
 
-// Placeholder views for sheet presentations
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    
+    @EnvironmentObject private var userManager: UserManager
+    @State private var preferences = UserPreferences()
+    @State private var didLoad = false
+
+    private let languages = [
+        ("es", "Español"),
+        ("en", "English"),
+        ("fr", "Français")
+    ]
+
+    private let currencies = [
+        ("EUR", "EUR (€)"),
+        ("USD", "USD ($)"),
+        ("GBP", "GBP (£)")
+    ]
+
     var body: some View {
-        NavigationView {
-            Text("Configuración")
-                .navigationTitle("Configuración")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Cerrar") { dismiss() }
+        NavigationStack {
+            Form {
+                Section("Preferencias") {
+                    Picker("Idioma", selection: $preferences.language) {
+                        ForEach(languages, id: \.0) { code, name in
+                            Text(name).tag(code)
+                        }
+                    }
+
+                    Picker("Moneda", selection: $preferences.currency) {
+                        ForEach(currencies, id: \.0) { code, name in
+                            Text(name).tag(code)
+                        }
                     }
                 }
+
+                Section("Privacidad") {
+                    Toggle("Compartir datos de ubicación", isOn: $preferences.privacy.shareLocationData)
+                    Toggle("Compartir datos de uso", isOn: $preferences.privacy.shareUsageData)
+                    Toggle("Permitir marketing", isOn: $preferences.privacy.allowMarketing)
+                }
+
+                Section("Accesibilidad") {
+                    Toggle("VoiceOver", isOn: $preferences.accessibility.voiceOver)
+                    Toggle("Texto grande", isOn: $preferences.accessibility.largeText)
+                    Toggle("Alto contraste", isOn: $preferences.accessibility.highContrast)
+                    Toggle("Reducir movimiento", isOn: $preferences.accessibility.reducedMotion)
+                }
+            }
+            .navigationTitle("Configuración")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancelar") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Guardar") { savePreferences() }
+                }
+            }
+            .onAppear {
+                if !didLoad {
+                    preferences = userManager.currentUser?.preferences ?? UserPreferences()
+                    didLoad = true
+                }
+            }
         }
+    }
+
+    private func savePreferences() {
+        userManager.updateUserProfile(preferences: preferences)
+        dismiss()
     }
 }
 
 struct SupportView: View {
     @Environment(\.dismiss) private var dismiss
-    
+    @Environment(\.openURL) private var openURL
+
+    private let faqs = [
+        SupportFAQ(question: "¿Cómo cambio mi método de pago?", answer: "En Perfil > Métodos de Pago puedes añadir o cambiar el predeterminado."),
+        SupportFAQ(question: "¿Puedo cancelar un viaje?", answer: "Sí, desde la pantalla del viaje en curso puedes cancelar antes de que el conductor llegue."),
+        SupportFAQ(question: "¿Dónde veo mis recibos?", answer: "En la sección de Viajes, entra en un viaje y verás el recibo.")
+    ]
+
     var body: some View {
-        NavigationView {
-            Text("Ayuda y Soporte")
-                .navigationTitle("Soporte")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Cerrar") { dismiss() }
+        NavigationStack {
+            List {
+                Section("Contacto directo") {
+                    SupportActionRow(
+                        icon: "phone.fill",
+                        title: "Llamar a soporte",
+                        subtitle: "+34 900 000 000"
+                    ) {
+                        openURL(URL(string: "tel://900000000")!)
+                    }
+
+                    SupportActionRow(
+                        icon: "envelope.fill",
+                        title: "Enviar correo",
+                        subtitle: "support@comforta.app"
+                    ) {
+                        openURL(URL(string: "mailto:support@comforta.app")!)
+                    }
+
+                    SupportActionRow(
+                        icon: "message.fill",
+                        title: "Chat en vivo",
+                        subtitle: "Respuesta en minutos"
+                    ) {
+                        openURL(URL(string: "mailto:support@comforta.app?subject=Chat%20Comforta")!)
                     }
                 }
+
+                Section("Centro de ayuda") {
+                    SupportActionRow(
+                        icon: "doc.text.fill",
+                        title: "Preguntas frecuentes",
+                        subtitle: "Respuestas rápidas"
+                    ) {}
+
+                    SupportActionRow(
+                        icon: "exclamationmark.bubble.fill",
+                        title: "Reportar un problema",
+                        subtitle: "Cuéntanos qué pasó"
+                    ) {
+                        openURL(URL(string: "mailto:support@comforta.app?subject=Reporte%20de%20problema")!)
+                    }
+                }
+
+                Section("FAQs") {
+                    ForEach(faqs) { faq in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(faq.question)
+                                .font(ComfortaDesign.Typography.body2)
+                            Text(faq.answer)
+                                .font(ComfortaDesign.Typography.caption2)
+                                .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Ayuda y soporte")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cerrar") { dismiss() }
+                }
+            }
         }
     }
 }
 
 struct PaymentMethodsView: View {
     @Environment(\.dismiss) private var dismiss
-    
+    @EnvironmentObject private var userManager: UserManager
+    @State private var methods: [PaymentMethodEntry] = []
+    @State private var showingAdd = false
+    @State private var didLoad = false
+
     var body: some View {
-        NavigationView {
-            Text("Métodos de Pago")
-                .navigationTitle("Métodos de Pago")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Cerrar") { dismiss() }
+        NavigationStack {
+            List {
+                if methods.isEmpty {
+                    Text("No tienes métodos de pago guardados.")
+                        .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                } else {
+                    ForEach(methods) { method in
+                        PaymentMethodRow(
+                            method: method,
+                            onSetDefault: {
+                                setDefault(method)
+                            },
+                            onDelete: {
+                                deleteMethod(method)
+                            }
+                        )
                     }
                 }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Métodos de pago")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cerrar") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Añadir") { showingAdd = true }
+                }
+            }
+            .onAppear {
+                if !didLoad {
+                    loadMethods()
+                    didLoad = true
+                }
+            }
+            .sheet(isPresented: $showingAdd) {
+                AddPaymentMethodView { newMethod in
+                    addMethod(newMethod)
+                }
+            }
+        }
+    }
+
+    private func loadMethods() {
+        let key = storageKey()
+        if let data = UserDefaults.standard.data(forKey: key),
+           let decoded = try? JSONDecoder().decode([PaymentMethodEntry].self, from: data) {
+            methods = decoded
+        } else {
+            methods = [PaymentMethodEntry(type: .cash, last4: nil, nickname: "Efectivo", isDefault: true)]
+            saveMethods()
+        }
+        ensureDefaultMethod()
+    }
+
+    private func saveMethods() {
+        let key = storageKey()
+        if let encoded = try? JSONEncoder().encode(methods) {
+            UserDefaults.standard.set(encoded, forKey: key)
+        }
+    }
+
+    private func storageKey() -> String {
+        let userId = userManager.currentUser?.id ?? "guest"
+        return "payment_methods_\(userId)"
+    }
+
+    private func ensureDefaultMethod() {
+        if methods.first(where: { $0.isDefault }) == nil, let first = methods.first {
+            setDefault(first)
+        } else if let defaultMethod = methods.first(where: { $0.isDefault }) {
+            userManager.updatePaymentMethod(defaultMethod.type)
+        }
+    }
+
+    private func addMethod(_ method: PaymentMethodEntry) {
+        if method.isDefault {
+            methods = methods.map { PaymentMethodEntry(id: $0.id, type: $0.type, last4: $0.last4, nickname: $0.nickname, isDefault: false) }
+        }
+        methods.append(method)
+        if method.isDefault || methods.count == 1 {
+            setDefault(method)
+        } else {
+            saveMethods()
+        }
+    }
+
+    private func setDefault(_ method: PaymentMethodEntry) {
+        methods = methods.map {
+            PaymentMethodEntry(
+                id: $0.id,
+                type: $0.type,
+                last4: $0.last4,
+                nickname: $0.nickname,
+                isDefault: $0.id == method.id
+            )
+        }
+        userManager.updatePaymentMethod(method.type)
+        saveMethods()
+    }
+
+    private func deleteMethod(_ method: PaymentMethodEntry) {
+        methods.removeAll { $0.id == method.id }
+        if method.isDefault, let newDefault = methods.first {
+            setDefault(newDefault)
+        } else {
+            saveMethods()
+        }
+    }
+}
+
+struct EditProfileView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var userManager: UserManager
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var phoneNumber = ""
+    @State private var email = ""
+    @State private var didLoad = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Datos personales") {
+                    TextField("Nombre", text: $firstName)
+                    TextField("Apellidos", text: $lastName)
+                    TextField("Teléfono", text: $phoneNumber)
+                        .keyboardType(.phonePad)
+                }
+
+                Section("Contacto") {
+                    Text(email.isEmpty ? "Sin email" : email)
+                        .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                }
+            }
+            .navigationTitle("Editar perfil")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancelar") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Guardar") { saveProfile() }
+                }
+            }
+            .onAppear {
+                if !didLoad {
+                    loadProfile()
+                    didLoad = true
+                }
+            }
+        }
+    }
+
+    private func loadProfile() {
+        guard let user = userManager.currentUser else { return }
+        firstName = user.firstName
+        lastName = user.lastName
+        phoneNumber = user.phoneNumber ?? ""
+        email = user.email ?? ""
+    }
+
+    private func saveProfile() {
+        userManager.updateUserProfile(
+            firstName: firstName.trimmingCharacters(in: .whitespacesAndNewlines),
+            lastName: lastName.trimmingCharacters(in: .whitespacesAndNewlines),
+            phoneNumber: phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : phoneNumber
+        )
+        dismiss()
+    }
+}
+
+struct ProfileStatsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var userManager: UserManager
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Resumen") {
+                    StatRow(label: "Viajes", value: "\(totalTrips)")
+                    StatRow(label: "Gastado", value: totalSpent)
+                    StatRow(label: "Tiempo", value: totalTime)
+                    StatRow(label: "Puntos", value: "\(loyaltyPoints)")
+                    StatRow(label: "Valoración", value: String(format: "%.1f", userRating))
+                }
+            }
+            .navigationTitle("Estadísticas")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cerrar") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var totalTrips: Int {
+        userManager.currentUser?.totalTrips ?? 0
+    }
+
+    private var totalSpent: String {
+        let amount = userManager.currentUser?.totalSpent ?? 0
+        return String(format: "€%.0f", amount)
+    }
+
+    private var totalTime: String {
+        "24h"
+    }
+
+    private var loyaltyPoints: Int {
+        userManager.currentUser?.loyaltyPoints ?? 0
+    }
+
+    private var userRating: Double {
+        userManager.currentUser?.rating ?? 5.0
+    }
+}
+
+struct NotificationsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var userManager: UserManager
+    @State private var preferences = UserPreferences()
+    @State private var didLoad = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("Pausar todas", isOn: pauseAllBinding)
+                } footer: {
+                    Text("Si pausas todas, no recibirás avisos importantes del viaje.")
+                }
+
+                Section("Canales") {
+                    Toggle("Notificaciones push", isOn: $preferences.notifications.pushNotifications)
+                    Toggle("Email", isOn: $preferences.notifications.emailNotifications)
+                    Toggle("SMS", isOn: $preferences.notifications.smsNotifications)
+                }
+
+                Section("Alertas") {
+                    Toggle("Actualizaciones de viaje", isOn: $preferences.notifications.rideUpdates)
+                    Toggle("Promociones y novedades", isOn: $preferences.notifications.promotions)
+                }
+            }
+            .navigationTitle("Notificaciones")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancelar") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Guardar") { savePreferences() }
+                }
+            }
+            .onAppear {
+                if !didLoad {
+                    preferences = userManager.currentUser?.preferences ?? UserPreferences()
+                    didLoad = true
+                }
+            }
+        }
+    }
+
+    private var pauseAllBinding: Binding<Bool> {
+        Binding(
+            get: { notificationsPaused },
+            set: { paused in
+                if paused {
+                    disableAllNotifications()
+                } else {
+                    restoreDefaultNotifications()
+                }
+            }
+        )
+    }
+
+    private var notificationsPaused: Bool {
+        let notif = preferences.notifications
+        return !notif.pushNotifications &&
+            !notif.emailNotifications &&
+            !notif.smsNotifications &&
+            !notif.rideUpdates &&
+            !notif.promotions
+    }
+
+    private func disableAllNotifications() {
+        preferences.notifications.pushNotifications = false
+        preferences.notifications.emailNotifications = false
+        preferences.notifications.smsNotifications = false
+        preferences.notifications.rideUpdates = false
+        preferences.notifications.promotions = false
+    }
+
+    private func restoreDefaultNotifications() {
+        preferences.notifications.pushNotifications = true
+        preferences.notifications.emailNotifications = true
+        preferences.notifications.smsNotifications = false
+        preferences.notifications.rideUpdates = true
+        preferences.notifications.promotions = false
+    }
+
+    private func savePreferences() {
+        userManager.updateUserProfile(preferences: preferences)
+        dismiss()
+    }
+}
+
+private struct SupportActionRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 18))
+                    .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle()
+                            .fill(ComfortaDesign.Colors.primaryGreen.opacity(0.12))
+                    )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(ComfortaDesign.Typography.body2)
+                        .foregroundColor(ComfortaDesign.Colors.textPrimary)
+                    Text(subtitle)
+                        .font(ComfortaDesign.Typography.caption2)
+                        .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(ComfortaDesign.Colors.textTertiary)
+            }
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct PaymentMethodEntry: Identifiable, Codable, Equatable {
+    let id: UUID
+    var type: PaymentType
+    var last4: String?
+    var nickname: String?
+    var isDefault: Bool
+
+    init(
+        id: UUID = UUID(),
+        type: PaymentType,
+        last4: String?,
+        nickname: String?,
+        isDefault: Bool
+    ) {
+        self.id = id
+        self.type = type
+        self.last4 = last4
+        self.nickname = nickname
+        self.isDefault = isDefault
+    }
+
+    var displayName: String {
+        if let nickname, !nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return nickname
+        }
+        return type.displayName
+    }
+
+    var detailText: String {
+        if let last4, !last4.isEmpty {
+            return "•••• \(last4)"
+        }
+        switch type {
+        case .cash:
+            return "Pago en efectivo"
+        case .applePay:
+            return "Apple Pay"
+        case .creditCard:
+            return "Tarjeta"
+        }
+    }
+}
+
+private struct PaymentMethodRow: View {
+    let method: PaymentMethodEntry
+    let onSetDefault: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: method.type.iconName)
+                .font(.system(size: 18))
+                .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+                .frame(width: 36, height: 36)
+                .background(
+                    Circle()
+                        .fill(ComfortaDesign.Colors.primaryGreen.opacity(0.12))
+                )
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(method.displayName)
+                        .font(ComfortaDesign.Typography.body2)
+                        .foregroundColor(ComfortaDesign.Colors.textPrimary)
+
+                    if method.isDefault {
+                        Text("Predeterminado")
+                            .font(ComfortaDesign.Typography.caption2)
+                            .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(ComfortaDesign.Colors.primaryGreen.opacity(0.15))
+                            )
+                    }
+                }
+
+                Text(method.detailText)
+                    .font(ComfortaDesign.Typography.caption2)
+                    .foregroundColor(ComfortaDesign.Colors.textSecondary)
+            }
+
+            Spacer()
+
+            if !method.isDefault {
+                Button("Predeterminado") {
+                    onSetDefault()
+                }
+                .font(ComfortaDesign.Typography.caption2)
+                .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            if !method.isDefault {
+                Button {
+                    onSetDefault()
+                } label: {
+                    Label("Predeterminado", systemImage: "checkmark.circle")
+                }
+                .tint(ComfortaDesign.Colors.primaryGreen)
+            }
+        }
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("Eliminar", systemImage: "trash")
+            }
+        }
+    }
+}
+
+private struct AddPaymentMethodView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var type: PaymentType = .creditCard
+    @State private var last4 = ""
+    @State private var nickname = ""
+    @State private var isDefault = true
+    let onSave: (PaymentMethodEntry) -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Tipo de método") {
+                    Picker("Método", selection: $type) {
+                        ForEach(PaymentType.allCases, id: \.self) { method in
+                            Text(method.displayName).tag(method)
+                        }
+                    }
+                }
+
+                Section("Detalles") {
+                    TextField("Nombre para identificar", text: $nickname)
+
+                    if type == .creditCard {
+                        TextField("Últimos 4 dígitos", text: $last4)
+                            .keyboardType(.numberPad)
+                            .onChange(of: last4) { newValue in
+                                let filtered = newValue.filter { $0.isNumber }
+                                if filtered.count > 4 {
+                                    last4 = String(filtered.prefix(4))
+                                } else {
+                                    last4 = filtered
+                                }
+                            }
+                    }
+                }
+
+                Section {
+                    Toggle("Marcar como predeterminado", isOn: $isDefault)
+                }
+            }
+            .navigationTitle("Añadir método")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancelar") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Guardar") { saveMethod() }
+                        .disabled(!canSave)
+                }
+            }
+        }
+    }
+
+    private var canSave: Bool {
+        if type == .creditCard {
+            return last4.count == 4
+        }
+        return true
+    }
+
+    private func saveMethod() {
+        let trimmedName = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        let entry = PaymentMethodEntry(
+            type: type,
+            last4: last4.isEmpty ? nil : last4,
+            nickname: trimmedName.isEmpty ? nil : trimmedName,
+            isDefault: isDefault
+        )
+        onSave(entry)
+        dismiss()
+    }
+}
+
+private struct StatRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundColor(.secondary)
         }
     }
 }

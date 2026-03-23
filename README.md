@@ -205,3 +205,17 @@ Para soporte técnico o consultas:
 - Email: soporte@comforta.app
 - Web: https://comforta.app
 # comfortaapp
+
+## Tests
+
+- Target: `ComfortaTests`
+- Run locally:
+  - `xcodebuild -project Comforta.xcodeproj -scheme Comforta -destination 'platform=iOS Simulator,name=iPhone 15' test`
+
+## CI/CD
+
+- Workflow: `.github/workflows/ios.yml`
+
+## Documentación
+
+- API contracts: `docs/API_CONTRACTS.md`

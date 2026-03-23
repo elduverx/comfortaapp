@@ -76,26 +76,27 @@ struct MapPreviewView: View {
             let originCoord = try await geocoder.geocodeAddress(origin)
             let destinationCoord = try await geocoder.geocodeAddress(destination)
             
-            let routeService = RouteService()
-            let routeInfo = try await routeService.calculateRoute(from: originCoord, to: destinationCoord)
-            
             await MainActor.run {
                 self.originCoordinate = originCoord
                 self.destinationCoordinate = destinationCoord
-                self.route = routeInfo.route
-                
-                // Ajustar región del mapa para mostrar toda la ruta
-                let rect = routeInfo.route.polyline.boundingMapRect
-                let region = MKCoordinateRegion(rect)
-                
-                // Agregar padding
-                mapRegion = MKCoordinateRegion(
-                    center: region.center,
-                    span: MKCoordinateSpan(
-                        latitudeDelta: region.span.latitudeDelta * 1.3,
-                        longitudeDelta: region.span.longitudeDelta * 1.3
-                    )
+                self.mapRegion = MKCoordinateRegion.regionToFit(
+                    coordinates: [originCoord, destinationCoord],
+                    paddingFactor: 1.35,
+                    minimumSpan: 0.01
                 )
+            }
+
+            do {
+                let routeService = RouteService()
+                let routeInfo = try await routeService.calculateRoute(from: originCoord, to: destinationCoord)
+
+                await MainActor.run {
+                    self.route = routeInfo.route
+                    let rect = routeInfo.route.polyline.boundingMapRect
+                    mapRegion = MKCoordinateRegion(rect.padded(by: 1.3, minimumSize: 1500))
+                }
+            } catch {
+                print("Error calculando ruta: \(error)")
             }
         } catch {
             print("Error cargando ruta: \(error)")

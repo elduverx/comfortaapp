@@ -13,11 +13,51 @@ class TripServiceAPI: ObservableObject {
 
     private let apiClient = APIClient.shared
     private var cancellables = Set<AnyCancellable>()
+    private var persistenceCancellable: AnyCancellable?
+    private let tripHistoryStorageKey = "trip_history_api_v1"
+    private let activeTripStorageKey = "active_trip_api_v1"
 
     private init() {
+        loadCachedTrips()
+        setupTripPersistence()
         // Load initial trip history
         Task {
             await loadTripHistory()
+        }
+    }
+
+    private func setupTripPersistence() {
+        persistenceCancellable = Publishers.CombineLatest($tripHistory, $activeTrip)
+            .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
+            .sink { [weak self] trips, active in
+                self?.persistTripCache(trips: trips, activeTrip: active)
+            }
+    }
+
+    private func persistTripCache(trips: [APITrip], activeTrip: APITrip?) {
+        if let encodedTrips = try? JSONEncoder().encode(trips) {
+            UserDefaults.standard.set(encodedTrips, forKey: tripHistoryStorageKey)
+        }
+
+        if let activeTrip = activeTrip,
+           let encodedActive = try? JSONEncoder().encode(activeTrip) {
+            UserDefaults.standard.set(encodedActive, forKey: activeTripStorageKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: activeTripStorageKey)
+        }
+    }
+
+    private func loadCachedTrips() {
+        if let data = UserDefaults.standard.data(forKey: tripHistoryStorageKey),
+           let cachedTrips = try? JSONDecoder().decode([APITrip].self, from: data) {
+            tripHistory = cachedTrips
+        }
+
+        if let data = UserDefaults.standard.data(forKey: activeTripStorageKey),
+           let cachedActive = try? JSONDecoder().decode(APITrip.self, from: data) {
+            activeTrip = cachedActive
+        } else if let cachedActive = tripHistory.first(where: { !$0.pagado && $0.estado == "PENDIENTE" }) {
+            activeTrip = cachedActive
         }
     }
 
@@ -26,6 +66,8 @@ class TripServiceAPI: ObservableObject {
     func createTrip(
         pickupLocation: String?,
         destination: String,
+        pickupCoordinate: CLLocationCoordinate2D? = nil,
+        destinationCoordinate: CLLocationCoordinate2D? = nil,
         startDate: Date,
         endDate: Date? = nil,
         timeSlot: String? = nil,
@@ -49,7 +91,11 @@ class TripServiceAPI: ObservableObject {
                 notas: notes,
                 distanciaKm: distanceKm,
                 precioBase: basePrice,
-                precioTotal: totalPrice
+                precioTotal: totalPrice,
+                pickupLat: pickupCoordinate?.latitude,
+                pickupLng: pickupCoordinate?.longitude,
+                destinationLat: destinationCoordinate?.latitude,
+                destinationLng: destinationCoordinate?.longitude
             )
 
             let response: TripResponse = try await apiClient.request(
@@ -173,6 +219,12 @@ class TripServiceAPI: ObservableObject {
         }
 
         return response.trip
+    }
+
+    // MARK: - Get Trip Status
+
+    func getTripStatus(tripId: String) async throws -> APITrip {
+        try await getTripDetails(id: tripId)
     }
 
     // MARK: - Update Trip

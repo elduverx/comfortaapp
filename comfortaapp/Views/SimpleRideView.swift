@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import CoreLocation
 
 struct SimpleRideView: View {
     @StateObject private var viewModel = SimpleRideViewModel()
@@ -7,6 +8,9 @@ struct SimpleRideView: View {
     @FocusState private var isPickupFieldFocused: Bool
     @State private var showingRideFlow = false
     @State private var showingWizard = false
+    @State private var showMapSelector = false
+    @State private var selectedDestinationCoord: CLLocationCoordinate2D?
+    @State private var selectedDestinationAddress: String?
     let userName: String
     let onLogout: () -> Void
     
@@ -60,6 +64,50 @@ struct SimpleRideView: View {
         .sheet(isPresented: $showingWizard) {
             WizardView()
         }
+        .sheet(isPresented: $showMapSelector) {
+            NavigationView {
+                if let pickupCoord = viewModel.pickupCoordinate {
+                    MapDestinationPicker(
+                        selectedDestination: $selectedDestinationCoord,
+                        selectedAddress: $selectedDestinationAddress,
+                        pickupLocation: pickupCoord,
+                        pickupAddress: viewModel.pickupText.isEmpty ? "Ubicación de recogida" : viewModel.pickupText,
+                        onDestinationConfirmed: { coordinate, address in
+                            viewModel.destinationCoordinate = coordinate
+                            viewModel.destinationText = address
+                            viewModel.calculateFare()
+                            showMapSelector = false
+                        }
+                    )
+                    .navigationTitle("Seleccionar destino")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Cerrar") {
+                                showMapSelector = false
+                            }
+                        }
+                    }
+                } else {
+                    VStack(spacing: 20) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 50))
+                            .foregroundStyle(.orange)
+
+                        Text("Primero selecciona la ubicación de recogida")
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                            .padding()
+
+                        Button("Cerrar") {
+                            showMapSelector = false
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding()
+                }
+            }
+        }
     }
     
     private var requestRideButton: some View {
@@ -72,7 +120,7 @@ struct SimpleRideView: View {
                 Text("Pedir viaje")
                     .font(.system(size: 18, weight: .semibold))
                 Spacer()
-                Text(viewModel.estimatedFare)
+                Text(viewModel.summaryFareText)
                     .font(.system(size: 16, weight: .bold))
             }
             .foregroundColor(.white)
@@ -93,7 +141,7 @@ struct SimpleRideView: View {
             destinationAddress: viewModel.destinationText,
             pickupCoordinate: viewModel.pickupCoordinate!,
             destinationCoordinate: viewModel.destinationCoordinate!,
-            estimatedFare: viewModel.estimatedFare,
+            estimatedFare: viewModel.summaryFareText,
             estimatedDistance: viewModel.estimatedDistance,
             estimatedDuration: viewModel.estimatedDuration,
             passengerName: userName
@@ -225,6 +273,43 @@ struct SimpleRideView: View {
                     if viewModel.isDestinationFieldActive && !viewModel.destinationSuggestions.isEmpty {
                         suggestionsList(for: viewModel.destinationSuggestions, isPickup: false)
                     }
+
+                    // Botón para seleccionar en el mapa
+                    Button {
+                        isDestinationFieldFocused = false
+                        viewModel.deactivateFields()
+                        showMapSelector = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "map.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white)
+
+                            Text("Seleccionar en el mapa")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.blue, .blue.opacity(0.8)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
                 }
             }
             .padding(.horizontal, 20)
@@ -293,11 +378,11 @@ struct SimpleRideView: View {
             VStack(spacing: 12) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Precio estimado")
+                        Text("Precio del viaje")
                             .font(.subheadline.weight(.medium))
                             .foregroundColor(.secondary)
                         
-                        Text(viewModel.estimatedFare)
+                        Text(viewModel.summaryFareText)
                             .font(.title2.bold())
                             .foregroundColor(.accentColor)
                     }

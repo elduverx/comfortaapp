@@ -1,0 +1,15 @@
+name: iOS CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: xcodebuild -project Comforta.xcodeproj -scheme Comforta -destination 'platform=iOS Simulator,name=iPhone 15' build
+      - name: Test
+        run: xcodebuild -project Comforta.xcodeproj -scheme Comforta -destination 'platform=iOS Simulator,name=iPhone 15' test

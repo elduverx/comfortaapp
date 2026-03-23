@@ -27,6 +27,9 @@ class NotificationService: NSObject, ObservableObject {
                     if let error = error {
                         print("Notification permission error: \(error)")
                     }
+                    if granted {
+                        UIApplication.shared.registerForRemoteNotifications()
+                    }
                     promise(.success(granted))
                 }
             }
@@ -141,6 +144,25 @@ class NotificationService: NSObject, ObservableObject {
         
         scheduleNotification(request)
     }
+
+    func scheduleTripCancelledNotification(for trip: Trip, reason: String? = nil) {
+        let content = UNMutableNotificationContent()
+        content.title = "Viaje Cancelado"
+        content.body = reason ?? "Tu viaje fue cancelado. Puedes solicitar otro cuando quieras."
+        content.sound = .default
+        content.userInfo = [
+            "type": "trip_cancelled",
+            "trip_id": trip.id
+        ]
+
+        let request = UNNotificationRequest(
+            identifier: "trip_cancelled_\(trip.id)",
+            content: content,
+            trigger: nil
+        )
+
+        scheduleNotification(request)
+    }
     
     // MARK: - Promotional Notifications
     
@@ -241,6 +263,7 @@ class NotificationService: NSObject, ObservableObject {
             "driver_arrived_\(tripId)",
             "trip_started_\(tripId)",
             "trip_completed_\(tripId)",
+            "trip_cancelled_\(tripId)",
             "trip_reminder_\(tripId)",
             "rating_reminder_\(tripId)"
         ]
@@ -310,10 +333,18 @@ extension NotificationService: UNUserNotificationCenterDelegate {
                 userInfo: ["trip_id": tripId]
             )
             
-        case "trip_reminder":
+        case "trip_reminder", "trip_cancelled":
             // Navigate to trip details
             NotificationCenter.default.post(
                 name: .showTripDetails,
+                object: nil,
+                userInfo: ["trip_id": tripId]
+            )
+
+        case "new_trip_request":
+            // Navigate to admin trip details
+            NotificationCenter.default.post(
+                name: .showAdminTripDetails,
                 object: nil,
                 userInfo: ["trip_id": tripId]
             )
@@ -335,6 +366,9 @@ extension Notification.Name {
     static let showActiveTrip = Notification.Name("showActiveTrip")
     static let showTripRating = Notification.Name("showTripRating")
     static let showTripDetails = Notification.Name("showTripDetails")
+    static let showAdminTripDetails = Notification.Name("showAdminTripDetails")
+    static let adminTripCompleted = Notification.Name("adminTripCompleted")
+    static let requestNewTrip = Notification.Name("requestNewTrip")
 }
 
 // MARK: - DateFormatter Extension

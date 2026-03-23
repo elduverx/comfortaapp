@@ -66,6 +66,12 @@ struct ModernRideView: View {
                 isFormExpanded = false
             }
         }
+        .onChange(of: selectedPlannerMode) { _, _ in
+            syncRequestedServiceDate()
+        }
+        .onChange(of: scheduledDate) { _, _ in
+            syncRequestedServiceDate()
+        }
     }
         .onAppear {
             if !hasTrackedHome {
@@ -75,18 +81,21 @@ struct ModernRideView: View {
             withAnimation(ComfortaDesign.Animation.slow) {
                 animateBackground = true
             }
+            syncRequestedServiceDate()
         }
         .sheet(isPresented: $showingWizard) {
             ModernWizardView()
         }
         .sheet(isPresented: $showPaywall) {
-            PaywallView(
-                fare: viewModel.estimatedFare,
-                distance: viewModel.estimatedDistance,
-                onConfirm: {
-                    showPaywall = false
-                    AnalyticsService.shared.track(.payConfirmed)
-                },
+                PaywallView(
+                    fare: viewModel.summaryFareText,
+                    distance: viewModel.estimatedDistance,
+                    onConfirm: {
+                        showPaywall = false
+                        AnalyticsService.shared.track(.payConfirmed)
+                        syncRequestedServiceDate()
+                        viewModel.confirmTrip()
+                    },
                 onCancel: {
                     showPaywall = false
                     AnalyticsService.shared.track(.payCancelled)
@@ -102,7 +111,7 @@ struct ModernRideView: View {
             LinearGradient(
                 colors: [
                     ComfortaDesign.Colors.background,
-                    .black,
+                    ComfortaDesign.Colors.surface,
                     ComfortaDesign.Colors.background
                 ],
                 startPoint: animateBackground ? .topLeading : .bottomTrailing,
@@ -306,6 +315,7 @@ struct ModernRideView: View {
                 TripConfirmationView(
                     trip: trip,
                     onConfirm: {
+                        syncRequestedServiceDate()
                         viewModel.confirmTrip()
                     },
                     onCancel: {
@@ -421,6 +431,7 @@ struct ModernRideView: View {
     }
     
     private func buttonAction() {
+        syncRequestedServiceDate()
         switch viewModel.currentTripState {
         case .readyToConfirm:
             if viewModel.currentTrip != nil {
@@ -509,10 +520,10 @@ struct ModernRideView: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 6) {
-                    Text(viewModel.estimatedFare)
+                    Text(viewModel.summaryFareText)
                         .font(ComfortaDesign.Typography.title3)
                         .foregroundColor(ComfortaDesign.Colors.primaryGreen)
-                    Text("Precio orientativo")
+                    Text("Precio del viaje")
                         .font(ComfortaDesign.Typography.caption1)
                         .foregroundColor(ComfortaDesign.Colors.textSecondary)
                 }
@@ -565,6 +576,7 @@ struct ModernRideView: View {
                 ) {
                     AnalyticsService.shared.track(.confirmRide, metadata: ["action": "pay"])
                     viewModel.calculateFare()
+                    syncRequestedServiceDate()
                     showPaywall = true
                 }
                 .disabled(viewModel.isCalculatingRoute || connectivity.isOffline)
@@ -614,7 +626,15 @@ struct ModernRideView: View {
             isFormExpanded = true
         }
     }
-    
+
+    private func syncRequestedServiceDate() {
+        if selectedPlannerMode == .schedule {
+            viewModel.requestedServiceDate = scheduledDate
+        } else {
+            viewModel.requestedServiceDate = Date()
+        }
+    }
+
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
@@ -727,20 +747,19 @@ struct InteractiveRideMap: View {
     
     var body: some View {
         ZStack {
-            Map(
-                coordinateRegion: $region,
-                showsUserLocation: true,
-                annotationItems: annotations
-            ) { annotation in
-                MapAnnotation(coordinate: annotation.coordinate) {
-                    ModernMapPin(type: annotation.type, title: annotation.title)
-                }
-            }
+            RouteMapView(
+                region: $region,
+                annotations: annotations.map {
+                    RouteMapAnnotation(
+                        coordinate: $0.coordinate,
+                        title: $0.title,
+                        tint: markerTint(for: $0.type)
+                    )
+                },
+                route: route,
+                showsUserLocation: annotations.isEmpty
+            )
             .ignoresSafeArea()
-            
-            if let polyline = route {
-                RouteOverlayView(polyline: polyline, region: region)
-            }
         }
         .overlay(alignment: .topTrailing) {
             VStack(spacing: ComfortaDesign.Spacing.sm) {
@@ -755,6 +774,13 @@ struct InteractiveRideMap: View {
         }
         .onTapGesture {
             onTap()
+        }
+    }
+
+    private func markerTint(for type: MapPinType) -> Color {
+        switch type {
+        case .pickup, .destination:
+            return ComfortaDesign.Colors.primaryGreen
         }
     }
 }
@@ -825,17 +851,14 @@ struct MapStatusBadge: View {
 struct ModernMapPin: View {
     let type: MapPinType
     let title: String
-    @State private var animate = false
     
     var body: some View {
         VStack(spacing: 6) {
             ZStack {
                 // Outer glow
                 Circle()
-                    .fill(pinColor.opacity(0.3))
-                    .frame(width: 50, height: 50)
-                    .scaleEffect(animate ? 1.2 : 1.0)
-                    .opacity(animate ? 0 : 1)
+                    .fill(pinColor.opacity(0.2))
+                    .frame(width: 48, height: 48)
                 
                 // Main pin
                 Circle()
@@ -878,11 +901,6 @@ struct ModernMapPin: View {
                             y: 2
                         )
                 )
-        }
-        .onAppear {
-            withAnimation(ComfortaDesign.Animation.spring.repeatForever(autoreverses: true)) {
-                animate = true
-            }
         }
     }
     
@@ -937,15 +955,34 @@ struct RouteOverlayView: View {
     }
     
     private func point(for coordinate: CLLocationCoordinate2D, in size: CGSize) -> CGPoint {
-        let span = region.span
-        guard span.latitudeDelta != 0, span.longitudeDelta != 0 else {
+        let rect = mapRect(for: region)
+        guard rect.size.width != 0, rect.size.height != 0 else {
             return CGPoint(x: size.width / 2, y: size.height / 2)
         }
-        let xRatio = (coordinate.longitude - region.center.longitude) / span.longitudeDelta
-        let yRatio = (region.center.latitude - coordinate.latitude) / span.latitudeDelta
-        let x = size.width / 2 + CGFloat(xRatio) * size.width
-        let y = size.height / 2 + CGFloat(yRatio) * size.height
+        let mapPoint = MKMapPoint(coordinate)
+        let x = (mapPoint.x - rect.minX) / rect.size.width * Double(size.width)
+        let y = (mapPoint.y - rect.minY) / rect.size.height * Double(size.height)
         return CGPoint(x: x, y: y)
+    }
+
+    private func mapRect(for region: MKCoordinateRegion) -> MKMapRect {
+        let halfLat = region.span.latitudeDelta / 2
+        let halfLon = region.span.longitudeDelta / 2
+        let topLeft = CLLocationCoordinate2D(
+            latitude: region.center.latitude + halfLat,
+            longitude: region.center.longitude - halfLon
+        )
+        let bottomRight = CLLocationCoordinate2D(
+            latitude: region.center.latitude - halfLat,
+            longitude: region.center.longitude + halfLon
+        )
+        let a = MKMapPoint(topLeft)
+        let b = MKMapPoint(bottomRight)
+        let minX = min(a.x, b.x)
+        let minY = min(a.y, b.y)
+        let maxX = max(a.x, b.x)
+        let maxY = max(a.y, b.y)
+        return MKMapRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 }
 

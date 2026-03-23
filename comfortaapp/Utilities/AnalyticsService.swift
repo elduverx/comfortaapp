@@ -28,6 +28,10 @@ enum AnalyticsEvent: String {
     case tripStatusChanged
     case tripRated
     case tripCancelledByAdmin
+    case tripAcceptedByAdmin
+    case tripRejectedByAdmin
+    case driverAssignedByAdmin
+    case tripCompletedByAdmin
     
     // Payment Events
     case paymentInitiated
@@ -45,9 +49,16 @@ enum AnalyticsEvent: String {
     case notificationsEnabled
     case notificationsDenied
     case notificationTapped
+    case pushNotificationRegistered
+    case pushNotificationFailed
+    case pushNotificationReceived
     
     // Admin Events
     case pricingUpdated
+    case vehicleTypesUpdated
+    case notificationSettingsUpdated
+    case reportExported
+    case securitySettingsUpdated
     case surgeActivated
     case alertResolved
     case supportTicketResolved

@@ -5,7 +5,19 @@ struct AdminDashboardView: View {
     @State private var selectedTab = 0
     @State private var showingUserDetails = false
     @State private var selectedUser: User?
+    @State private var showingTripDetails = false
+    @State private var selectedTrip: Trip?
     @State private var actionFeedback: AdminActionFeedback?
+    @State private var pendingTripId: String?
+
+    // Settings Views States
+    @State private var showingPricingSettings = false
+    @State private var showingVehicleTypes = false
+    @State private var showingNotificationSettings = false
+    @State private var showingSuspendedUsers = false
+    @State private var showingReports = false
+    @State private var showingSecuritySettings = false
+    @State private var showingAdvancedReports = false
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -16,7 +28,7 @@ struct AdminDashboardView: View {
                 Label("Dashboard", systemImage: "rectangle.grid.2x2.fill")
             }
             .tag(0)
-            
+
             tabContainer(title: "Usuarios") {
                 usersTab
             }
@@ -24,7 +36,7 @@ struct AdminDashboardView: View {
                 Label("Usuarios", systemImage: "person.3.fill")
             }
             .tag(1)
-            
+
             tabContainer(title: "Viajes") {
                 tripsTab
             }
@@ -32,7 +44,8 @@ struct AdminDashboardView: View {
                 Label("Viajes", systemImage: "car.fill")
             }
             .tag(2)
-            
+            .badgeIf(adminService.newTripsCount > 0, count: adminService.newTripsCount)
+
             tabContainer(title: "Finanzas") {
                 financesTab
             }
@@ -40,7 +53,7 @@ struct AdminDashboardView: View {
                 Label("Finanzas", systemImage: "eurosign.circle.fill")
             }
             .tag(3)
-            
+
             tabContainer(title: "Perfil") {
                 profileTab
             }
@@ -52,11 +65,81 @@ struct AdminDashboardView: View {
         .accentColor(ComfortaDesign.Colors.primaryGreen)
         .onAppear {
             adminService.loadDashboardData()
+            adminService.requestNotificationPermissions()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showAdminTripDetails)) { notification in
+            guard let tripId = notification.userInfo?["trip_id"] as? String else { return }
+            pendingTripId = tripId
+            selectedTab = 2
+            adminService.startAutoRefresh()
+            adminService.newTripsCount = 0
+
+            if let trip = adminService.allTrips.first(where: { $0.id == tripId }) {
+                selectedTrip = trip
+                showingTripDetails = true
+                pendingTripId = nil
+            }
+
+            Task {
+                if let trip = await adminService.fetchTripDetail(tripId) {
+                    await MainActor.run {
+                        selectedTrip = trip
+                        showingTripDetails = true
+                        pendingTripId = nil
+                    }
+                } else {
+                    adminService.loadDashboardData()
+                }
+            }
+        }
+        .onReceive(adminService.$allTrips) { _ in
+            openPendingTripIfPossible()
+        }
+        .onChange(of: selectedTab) { newTab in
+            // Enable auto-refresh when viewing Trips tab
+            if newTab == 2 {
+                adminService.startAutoRefresh()
+                // Reset new trips count when viewing trips tab
+                adminService.newTripsCount = 0
+            } else {
+                adminService.stopAutoRefresh()
+            }
+        }
+        .onDisappear {
+            adminService.stopAutoRefresh()
         }
         .sheet(isPresented: $showingUserDetails) {
             if let user = selectedUser {
-                UserDetailsView(user: user)
+                AdminUserDetailsView(user: user)
             }
+        }
+        .sheet(isPresented: $showingTripDetails) {
+            if let trip = selectedTrip {
+                TripDetailsAdminView(trip: trip, onAction: { action in
+                    handleTripAction(action, for: trip)
+                })
+            }
+        }
+        .sheet(isPresented: $showingPricingSettings) {
+            AdminPricingSettingsView()
+        }
+        .sheet(isPresented: $showingVehicleTypes) {
+            AdminVehicleTypesView()
+        }
+        .sheet(isPresented: $showingNotificationSettings) {
+            AdminNotificationsSettingsView()
+        }
+        .sheet(isPresented: $showingSuspendedUsers) {
+            AdminSuspendedUsersView()
+        }
+        .sheet(isPresented: $showingReports) {
+            AdminReportsView()
+        }
+        .sheet(isPresented: $showingSecuritySettings) {
+            AdminSecuritySettingsView()
+        }
+        .sheet(isPresented: $showingAdvancedReports) {
+            AdminAdvancedReportsView()
         }
         .alert(item: $actionFeedback) { feedback in
             Alert(
@@ -74,6 +157,14 @@ struct AdminDashboardView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .background(ComfortaDesign.Colors.background.ignoresSafeArea())
         }
+    }
+
+    private func openPendingTripIfPossible() {
+        guard let tripId = pendingTripId else { return }
+        guard let trip = adminService.allTrips.first(where: { $0.id == tripId }) else { return }
+        selectedTrip = trip
+        showingTripDetails = true
+        pendingTripId = nil
     }
     
     private var quickActionsSection: some View {
@@ -230,6 +321,33 @@ struct AdminDashboardView: View {
         HapticManager.shared.impact(.light)
     }
 
+    private func handleTripAction(_ action: TripAdminAction, for trip: Trip) {
+        Task {
+            switch action {
+            case .accept:
+                await adminService.acceptTrip(trip.id)
+                showingTripDetails = false
+                actionFeedback = AdminActionFeedback(title: "Viaje Aceptado", message: "El viaje ha sido aceptado exitosamente.")
+            case .reject:
+                await adminService.rejectTrip(trip.id, reason: "Rechazado por administrador")
+                showingTripDetails = false
+                actionFeedback = AdminActionFeedback(title: "Viaje Rechazado", message: "El viaje ha sido rechazado.")
+            case .cancel:
+                await adminService.cancelTrip(trip.id, reason: "Cancelado por administrador")
+                showingTripDetails = false
+                actionFeedback = AdminActionFeedback(title: "Viaje Cancelado", message: "El viaje ha sido cancelado.")
+            case .complete:
+                await adminService.completeTrip(trip.id)
+                showingTripDetails = false
+                actionFeedback = AdminActionFeedback(title: "Viaje Completado", message: "El viaje ha sido marcado como completado.")
+            case .assignDriver(let driverId, let driverName):
+                await adminService.assignDriver(trip.id, driverId: driverId, driverName: driverName)
+                showingTripDetails = false
+                actionFeedback = AdminActionFeedback(title: "Conductor Asignado", message: "El conductor \(driverName) ha sido asignado al viaje.")
+            }
+        }
+    }
+
     // MARK: - Dashboard Tab
     
     private var dashboardTab: some View {
@@ -372,7 +490,7 @@ struct AdminDashboardView: View {
             HStack {
                 TextField("Buscar viajes...", text: $adminService.tripSearchQuery)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
-                
+
                 Menu("Estado") {
                     Button("Todos") { adminService.selectedTripStatus = nil }
                     ForEach(TripStatus.allCases, id: \.self) { status in
@@ -382,14 +500,33 @@ struct AdminDashboardView: View {
                     }
                 }
                 .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+
+                // Auto-refresh indicator
+                if adminService.isAutoRefreshEnabled {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+                            .font(.caption)
+                        Text("Auto")
+                            .font(.caption2)
+                            .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(ComfortaDesign.Colors.primaryGreen.opacity(0.1))
+                    .cornerRadius(8)
+                }
             }
             .padding()
             
             // Trips List
             List(adminService.filteredTrips) { trip in
-                TripRowView(trip: trip)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                TripRowView(trip: trip) {
+                    selectedTrip = trip
+                    showingTripDetails = true
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             .listStyle(PlainListStyle())
         }
@@ -608,15 +745,29 @@ struct AdminDashboardView: View {
                 Text("Configuración")
                     .font(ComfortaDesign.Typography.title3)
                     .foregroundColor(ComfortaDesign.Colors.textPrimary)
-                
+
                 VStack(spacing: ComfortaDesign.Spacing.sm) {
-                    SettingRow(icon: "eurosign.circle", title: "Precios y Tarifas", action: {})
-                    SettingRow(icon: "car.circle", title: "Tipos de Vehículo", action: {})
-                    SettingRow(icon: "bell.circle", title: "Notificaciones", action: {})
-                    SettingRow(icon: "person.crop.circle.badge.xmark", title: "Usuarios Suspendidos", action: {})
-                    SettingRow(icon: "exclamationmark.triangle", title: "Reportes", action: {})
-                    SettingRow(icon: "shield.checkered", title: "Seguridad", action: {})
-                    SettingRow(icon: "chart.bar", title: "Reportes Avanzados", action: {})
+                    SettingRow(icon: "eurosign.circle", title: "Precios y Tarifas", action: {
+                        showingPricingSettings = true
+                    })
+                    SettingRow(icon: "car.circle", title: "Tipos de Vehículo", action: {
+                        showingVehicleTypes = true
+                    })
+                    SettingRow(icon: "bell.circle", title: "Notificaciones", action: {
+                        showingNotificationSettings = true
+                    })
+                    SettingRow(icon: "person.crop.circle.badge.xmark", title: "Usuarios Suspendidos", action: {
+                        showingSuspendedUsers = true
+                    })
+                    SettingRow(icon: "exclamationmark.triangle", title: "Reportes", action: {
+                        showingReports = true
+                    })
+                    SettingRow(icon: "shield.checkered", title: "Seguridad", action: {
+                        showingSecuritySettings = true
+                    })
+                    SettingRow(icon: "chart.bar", title: "Reportes Avanzados", action: {
+                        showingAdvancedReports = true
+                    })
                 }
             }
         }
@@ -642,6 +793,17 @@ struct AdminDashboardView: View {
                 )
             )
             .cornerRadius(ComfortaDesign.Radius.md)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func badgeIf(_ condition: Bool, count: Int) -> some View {
+        if condition {
+            badge(count)
+        } else {
+            self
         }
     }
 }
@@ -782,72 +944,76 @@ struct UserRowView: View {
 
 struct TripRowView: View {
     let trip: Trip
-    
+    let action: () -> Void
+
     var body: some View {
-        ModernCard(style: .surface) {
-            VStack(alignment: .leading, spacing: ComfortaDesign.Spacing.sm) {
-                HStack {
-                    Text("#\(trip.id.prefix(8))")
-                        .font(ComfortaDesign.Typography.caption1)
-                        .foregroundColor(ComfortaDesign.Colors.textSecondary)
-                    
-                    Spacer()
-                    
-                    Text(trip.status.displayName)
-                        .font(ComfortaDesign.Typography.caption1)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule()
-                                .fill(statusColor.opacity(0.2))
-                        )
-                        .foregroundColor(statusColor)
-                }
-                
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Desde")
-                            .font(ComfortaDesign.Typography.caption2)
-                            .foregroundColor(ComfortaDesign.Colors.textSecondary)
-                        Text(trip.pickupLocation.address)
+        Button(action: action) {
+            ModernCard(style: .surface) {
+                VStack(alignment: .leading, spacing: ComfortaDesign.Spacing.sm) {
+                    HStack {
+                        Text("#\(trip.id.prefix(8))")
                             .font(ComfortaDesign.Typography.caption1)
-                            .foregroundColor(ComfortaDesign.Colors.textPrimary)
-                            .lineLimit(1)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "arrow.right")
-                        .foregroundColor(ComfortaDesign.Colors.textSecondary)
-                    
-                    Spacer()
-                    
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("Hasta")
-                            .font(ComfortaDesign.Typography.caption2)
                             .foregroundColor(ComfortaDesign.Colors.textSecondary)
-                        Text(trip.destinationLocation.address)
+
+                        Spacer()
+
+                        Text(trip.status.displayName)
                             .font(ComfortaDesign.Typography.caption1)
-                            .foregroundColor(ComfortaDesign.Colors.textPrimary)
-                            .lineLimit(1)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(statusColor.opacity(0.2))
+                            )
+                            .foregroundColor(statusColor)
                     }
-                }
-                
-                HStack {
-                    Text("€\(trip.estimatedFare, specifier: "%.2f")")
-                        .font(ComfortaDesign.Typography.body2)
-                        .foregroundColor(ComfortaDesign.Colors.primaryGreen)
-                    
-                    Spacer()
-                    
-                    Text(DateFormatter.shortDateFormatter.string(from: trip.createdAt))
-                        .font(ComfortaDesign.Typography.caption1)
-                        .foregroundColor(ComfortaDesign.Colors.textSecondary)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Desde")
+                                .font(ComfortaDesign.Typography.caption2)
+                                .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                            Text(trip.pickupLocation.address)
+                                .font(ComfortaDesign.Typography.caption1)
+                                .foregroundColor(ComfortaDesign.Colors.textPrimary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "arrow.right")
+                            .foregroundColor(ComfortaDesign.Colors.textSecondary)
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("Hasta")
+                                .font(ComfortaDesign.Typography.caption2)
+                                .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                            Text(trip.destinationLocation.address)
+                                .font(ComfortaDesign.Typography.caption1)
+                                .foregroundColor(ComfortaDesign.Colors.textPrimary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    HStack {
+                        Text("€\(trip.estimatedFare, specifier: "%.2f")")
+                            .font(ComfortaDesign.Typography.body2)
+                            .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+
+                        Spacer()
+
+                        Text(DateFormatter.shortDateFormatter.string(from: trip.createdAt))
+                            .font(ComfortaDesign.Typography.caption1)
+                            .foregroundColor(ComfortaDesign.Colors.textSecondary)
+                    }
                 }
             }
         }
+        .buttonStyle(PlainButtonStyle())
     }
-    
+
     private var statusColor: Color {
         switch trip.status {
         case .completed:
@@ -1351,6 +1517,247 @@ struct SimpleBarChart: View {
             }
         }
         .padding()
+    }
+}
+
+// MARK: - Trip Admin Actions
+
+enum TripAdminAction {
+    case accept
+    case reject
+    case cancel
+    case complete
+    case assignDriver(driverId: String, driverName: String)
+}
+
+struct TripDetailsAdminView: View {
+    let trip: Trip
+    let onAction: (TripAdminAction) -> Void
+
+    @State private var showingDriverAssignment = false
+    @State private var driverId = ""
+    @State private var driverName = ""
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: ComfortaDesign.Spacing.lg) {
+                    // Trip Status
+                    statusSection
+
+                    // Trip Details
+                    tripDetailsSection
+
+                    // Actions - Show different actions based on trip status
+                    if trip.status == .requested || trip.status == .scheduled {
+                        requestedActionsSection
+                    } else if trip.status == .driverAssigned || trip.status == .driverEnRoute || trip.status == .driverArrived || trip.status == .inProgress {
+                        inProgressActionsSection
+                    }
+
+                    Spacer()
+                }
+                .padding(ComfortaDesign.Spacing.lg)
+            }
+            .navigationTitle("Detalle de Viaje")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cerrar") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private var statusSection: some View {
+        ModernCard(style: .glass) {
+            VStack(spacing: ComfortaDesign.Spacing.md) {
+                Text("Estado del Viaje")
+                    .font(ComfortaDesign.Typography.title3)
+                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
+
+                Text(trip.status.displayName)
+                    .font(ComfortaDesign.Typography.title2)
+                    .foregroundColor(statusColor)
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 24)
+                    .background(
+                        Capsule()
+                            .fill(statusColor.opacity(0.2))
+                    )
+            }
+        }
+    }
+
+    private var tripDetailsSection: some View {
+        ModernCard(style: .surface) {
+            VStack(alignment: .leading, spacing: ComfortaDesign.Spacing.md) {
+                Text("Información del Viaje")
+                    .font(ComfortaDesign.Typography.title3)
+                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
+
+                Divider().background(ComfortaDesign.Colors.glassBorder)
+
+                detailRow(title: "ID", value: trip.id.prefix(8).description, icon: "number")
+                detailRow(title: "Desde", value: trip.pickupLocation.address, icon: "location.circle")
+                detailRow(title: "Hasta", value: trip.destinationLocation.address, icon: "mappin.circle")
+                detailRow(title: "Tarifa Estimada", value: String(format: "€%.2f", trip.estimatedFare), icon: "eurosign.circle")
+                detailRow(title: "Distancia", value: String(format: "%.1f km", trip.estimatedDistance), icon: "ruler")
+                detailRow(title: "Fecha", value: DateFormatter.shortDateFormatter.string(from: trip.createdAt), icon: "calendar")
+            }
+        }
+    }
+
+    private var requestedActionsSection: some View {
+        ModernCard(style: .surface) {
+            VStack(spacing: ComfortaDesign.Spacing.md) {
+                Text("Acciones")
+                    .font(ComfortaDesign.Typography.title3)
+                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
+
+                Divider().background(ComfortaDesign.Colors.glassBorder)
+
+                // Accept Button
+                Button {
+                    onAction(.accept)
+                } label: {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Aceptar Viaje")
+                    }
+                    .font(ComfortaDesign.Typography.body1)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(ComfortaDesign.Colors.primaryGreen)
+                    .cornerRadius(ComfortaDesign.Radius.md)
+                }
+
+                // Assign Driver Button
+                Button {
+                    showingDriverAssignment = true
+                } label: {
+                    HStack {
+                        Image(systemName: "person.circle.fill")
+                        Text("Asignar Conductor")
+                    }
+                    .font(ComfortaDesign.Typography.body1)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(ComfortaDesign.Colors.info)
+                    .cornerRadius(ComfortaDesign.Radius.md)
+                }
+
+                // Reject Button
+                Button {
+                    onAction(.reject)
+                } label: {
+                    HStack {
+                        Image(systemName: "xmark.circle.fill")
+                        Text("Rechazar Viaje")
+                    }
+                    .font(ComfortaDesign.Typography.body1)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(ComfortaDesign.Colors.error)
+                    .cornerRadius(ComfortaDesign.Radius.md)
+                }
+            }
+        }
+        .alert("Asignar Conductor", isPresented: $showingDriverAssignment) {
+            TextField("ID del Conductor", text: $driverId)
+            TextField("Nombre del Conductor", text: $driverName)
+            Button("Cancelar", role: .cancel) {}
+            Button("Asignar") {
+                if !driverId.isEmpty && !driverName.isEmpty {
+                    onAction(.assignDriver(driverId: driverId, driverName: driverName))
+                }
+            }
+        } message: {
+            Text("Ingresa los datos del conductor a asignar")
+        }
+    }
+
+    private var inProgressActionsSection: some View {
+        ModernCard(style: .surface) {
+            VStack(spacing: ComfortaDesign.Spacing.md) {
+                Text("Acciones")
+                    .font(ComfortaDesign.Typography.title3)
+                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
+
+                Divider().background(ComfortaDesign.Colors.glassBorder)
+
+                // Complete Button
+                Button {
+                    onAction(.complete)
+                } label: {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Completar Viaje")
+                    }
+                    .font(ComfortaDesign.Typography.body1)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(ComfortaDesign.Colors.primaryGreen)
+                    .cornerRadius(ComfortaDesign.Radius.md)
+                }
+
+                // Cancel Button
+                Button {
+                    onAction(.cancel)
+                } label: {
+                    HStack {
+                        Image(systemName: "xmark.circle.fill")
+                        Text("Cancelar Viaje")
+                    }
+                    .font(ComfortaDesign.Typography.body1)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(ComfortaDesign.Colors.error)
+                    .cornerRadius(ComfortaDesign.Radius.md)
+                }
+            }
+        }
+    }
+
+    private func detailRow(title: String, value: String, icon: String) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+                .frame(width: 24)
+
+            Text(title)
+                .font(ComfortaDesign.Typography.body2)
+                .foregroundColor(ComfortaDesign.Colors.textSecondary)
+
+            Spacer()
+
+            Text(value)
+                .font(ComfortaDesign.Typography.body1)
+                .foregroundColor(ComfortaDesign.Colors.textPrimary)
+        }
+    }
+
+    private var statusColor: Color {
+        switch trip.status {
+        case .completed:
+            return ComfortaDesign.Colors.primaryGreen
+        case .cancelled, .failed:
+            return ComfortaDesign.Colors.error
+        case .inProgress:
+            return ComfortaDesign.Colors.warning
+        case .requested, .scheduled:
+            return ComfortaDesign.Colors.info
+        default:
+            return ComfortaDesign.Colors.textSecondary
+        }
     }
 }
 

@@ -5,13 +5,14 @@ struct PaywallView: View {
     let distance: String
     let onConfirm: () -> Void
     let onCancel: () -> Void
+    @State private var selectedPaymentOption: PaymentOption = .card
     
     var body: some View {
         ZStack {
             LinearGradient(
                 colors: [
                     ComfortaDesign.Colors.background,
-                    .black,
+                    ComfortaDesign.Colors.surface,
                     ComfortaDesign.Colors.background
                 ],
                 startPoint: .topLeading,
@@ -67,6 +68,23 @@ struct PaywallView: View {
                                 .font(ComfortaDesign.Typography.caption1)
                                 .foregroundColor(ComfortaDesign.Colors.textSecondary)
                         }
+
+                        VStack(alignment: .leading, spacing: ComfortaDesign.Spacing.sm) {
+                            Text("Metodo de pago")
+                                .font(ComfortaDesign.Typography.body1)
+                                .foregroundColor(ComfortaDesign.Colors.textPrimary)
+
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: ComfortaDesign.Spacing.sm) {
+                                ForEach(PaymentOption.allCases) { option in
+                                    PaymentOptionButton(
+                                        option: option,
+                                        isSelected: selectedPaymentOption == option
+                                    ) {
+                                        selectedPaymentOption = option
+                                    }
+                                }
+                            }
+                        }
                         
                         LiquidButton("Confirmar y pagar", icon: "checkmark.seal.fill", style: .primary, size: .large) {
                             onConfirm()
@@ -89,5 +107,63 @@ struct PaywallView: View {
         .onAppear {
             AnalyticsService.shared.track(.viewPaywall)
         }
+    }
+}
+
+private enum PaymentOption: String, CaseIterable, Identifiable {
+    case card
+    case bizum
+    case cash
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .card:
+            return "Tarjeta"
+        case .bizum:
+            return "Bizum"
+        case .cash:
+            return "Efectivo"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .card:
+            return "creditcard.fill"
+        case .bizum:
+            return "wave.3.right.circle.fill"
+        case .cash:
+            return "banknote.fill"
+        }
+    }
+}
+
+private struct PaymentOptionButton: View {
+    let option: PaymentOption
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: option.icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(isSelected ? ComfortaDesign.Colors.primaryGreen : ComfortaDesign.Colors.textSecondary)
+                Text(option.title)
+                    .font(ComfortaDesign.Typography.caption1)
+                    .foregroundColor(ComfortaDesign.Colors.textPrimary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(isSelected ? ComfortaDesign.Colors.lightGreen.opacity(0.35) : ComfortaDesign.Colors.surfaceSecondary)
+            .cornerRadius(ComfortaDesign.Radius.md)
+            .overlay(
+                RoundedRectangle(cornerRadius: ComfortaDesign.Radius.md)
+                    .stroke(isSelected ? ComfortaDesign.Colors.primaryGreen : ComfortaDesign.Colors.glassBorder, lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }

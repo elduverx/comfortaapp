@@ -129,11 +129,13 @@ class AuthServiceAPI: ObservableObject {
         do {
             // Get refresh token
             let refreshToken = KeychainManager.shared.getRefreshToken()
+            let deviceToken = PushNotificationService.shared.deviceToken
+                ?? UserDefaults.standard.string(forKey: "push_device_token")
 
             // Call logout API (best effort, don't fail if it errors)
             let request = LogoutRequest(
                 refreshToken: refreshToken,
-                deviceToken: nil // TODO: Add device token in Phase 3
+                deviceToken: deviceToken
             )
 
             try? await apiClient.requestNoResponse(

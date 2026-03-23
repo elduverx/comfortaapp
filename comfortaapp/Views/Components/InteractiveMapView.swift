@@ -31,7 +31,6 @@ struct InteractiveMapView: View {
             }
         }
         .mapControls {
-            MapUserLocationButton()
             MapCompass()
             MapScaleView()
         }
@@ -50,7 +49,17 @@ struct InteractiveMapView: View {
             destinationCoordinate = try await geocoder.geocodeAddress(destination)
             
             guard let orig = originCoordinate, let dest = destinationCoordinate else { return }
-            
+
+            await MainActor.run {
+                position = .region(
+                    MKCoordinateRegion.regionToFit(
+                        coordinates: [orig, dest],
+                        paddingFactor: 1.35,
+                        minimumSpan: 0.01
+                    )
+                )
+            }
+
             let routeService = RouteService()
             let routeInfo = try await routeService.calculateRoute(from: orig, to: dest)
             
@@ -59,7 +68,7 @@ struct InteractiveMapView: View {
                 
                 // Centrar cámara en la ruta
                 let rect = routeInfo.route.polyline.boundingMapRect
-                position = .rect(rect)
+                position = .rect(rect.padded(by: 1.25, minimumSize: 1500))
             }
         } catch {
             print("Error: \(error)")

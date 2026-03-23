@@ -24,19 +24,22 @@ struct ModernCard<Content: View>: View {
             .background(backgroundView)
             .scaleEffect(isHovered && animation ? 1.02 : 1.0)
             .animation(ComfortaDesign.Animation.spring, value: isHovered)
-            .onTapGesture {
-                if animation {
-                    withAnimation(ComfortaDesign.Animation.fast) {
-                        isHovered = true
-                    }
-                    
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    if animation {
                         withAnimation(ComfortaDesign.Animation.fast) {
-                            isHovered = false
+                            isHovered = true
+                        }
+
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            withAnimation(ComfortaDesign.Animation.fast) {
+                                isHovered = false
+                            }
                         }
                     }
                 }
-            }
+            )
     }
     
     @ViewBuilder

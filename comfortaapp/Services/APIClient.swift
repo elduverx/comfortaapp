@@ -128,74 +128,82 @@ class APIClient {
         queryItems: [URLQueryItem]? = nil,
         requiresAuth: Bool = true
     ) async throws -> T {
-        // Encode body if provided
-        let bodyData: Data? = if let body = body {
-            try jsonEncoder.encode(body)
-        } else {
-            nil
-        }
-
-        // Build request
-        var request = try buildRequest(
-            endpoint: endpoint,
-            method: method,
-            body: bodyData,
-            queryItems: queryItems,
-            requiresAuth: requiresAuth
-        )
-
-        if APIConfiguration.enableLogging {
-            print("📤 \(method.rawValue) \(request.url?.absoluteString ?? "")")
-            if let body = bodyData, let jsonString = String(data: body, encoding: .utf8) {
-                print("📦 Body: \(jsonString)")
-            }
-        }
-
-        // Execute request
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIError.unknown
-        }
-
-        if APIConfiguration.enableLogging {
-            print("📥 Response: \(httpResponse.statusCode)")
-            if let jsonString = String(data: data, encoding: .utf8) {
-                print("📦 Data: \(jsonString)")
-            }
-        }
-
-        // Handle response status codes
-        switch httpResponse.statusCode {
-        case 200...299:
-            // Success
-            do {
-                return try jsonDecoder.decode(T.self, from: data)
-            } catch {
-                throw APIError.decodingError(error)
+        do {
+            // Encode body if provided
+            let bodyData: Data? = if let body = body {
+                try jsonEncoder.encode(body)
+            } else {
+                nil
             }
 
-        case 401:
-            // Unauthorized - token expired
-            throw APIError.unauthorized
-
-        case 400...499:
-            // Client error
-            let errorMessage = try? jsonDecoder.decode(ErrorResponse.self, from: data)
-            throw APIError.serverError(
-                statusCode: httpResponse.statusCode,
-                message: errorMessage?.error.message
+            // Build request
+            var request = try buildRequest(
+                endpoint: endpoint,
+                method: method,
+                body: bodyData,
+                queryItems: queryItems,
+                requiresAuth: requiresAuth
             )
 
-        case 500...599:
-            // Server error
-            throw APIError.serverError(
-                statusCode: httpResponse.statusCode,
-                message: "Error del servidor"
-            )
+            if APIConfiguration.enableLogging {
+                print("📤 \(method.rawValue) \(request.url?.absoluteString ?? "")")
+                if let body = bodyData, let jsonString = String(data: body, encoding: .utf8) {
+                    print("📦 Body: \(jsonString)")
+                }
+            }
 
-        default:
-            throw APIError.unknown
+            // Execute request
+            let (data, response) = try await session.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw APIError.unknown
+            }
+
+            if APIConfiguration.enableLogging {
+                print("📥 Response: \(httpResponse.statusCode)")
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    print("📦 Data: \(jsonString)")
+                }
+            }
+
+            // Handle response status codes
+            switch httpResponse.statusCode {
+            case 200...299:
+                // Success
+                do {
+                    return try jsonDecoder.decode(T.self, from: data)
+                } catch {
+                    throw APIError.decodingError(error)
+                }
+
+            case 401:
+                // Unauthorized - token expired
+                throw APIError.unauthorized
+
+            case 400...499:
+                // Client error
+                let errorMessage = try? jsonDecoder.decode(ErrorResponse.self, from: data)
+                throw APIError.serverError(
+                    statusCode: httpResponse.statusCode,
+                    message: errorMessage?.error.message
+                )
+
+            case 500...599:
+                // Server error
+                throw APIError.serverError(
+                    statusCode: httpResponse.statusCode,
+                    message: "Error del servidor"
+                )
+
+            default:
+                throw APIError.unknown
+            }
+        } catch {
+            MonitoringService.shared.record(
+                error: error,
+                context: "\(method.rawValue) \(endpoint.path)"
+            )
+            throw error
         }
     }
 

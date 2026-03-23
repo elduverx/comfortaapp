@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import CoreLocation
 
 class WizardViewModel: ObservableObject {
     @Published var currentStep: Int = 1
@@ -8,7 +9,11 @@ class WizardViewModel: ObservableObject {
     @Published var destino: String = ""
     @Published var fechaInicio: Date = Date()
     @Published var franjaHoraria: String = "09:00-10:00"
-    
+
+    // Coordenadas de ubicaciones
+    @Published var lugarRecogidaCoordinate: CLLocationCoordinate2D?
+    @Published var destinoCoordinate: CLLocationCoordinate2D?
+
     // Datos del pasajero
     @Published var nombrePasajero: String = ""
     @Published var telefonoPasajero: String = ""
@@ -37,6 +42,8 @@ class WizardViewModel: ObservableObject {
         currentStep = 1
         lugarRecogida = ""
         destino = ""
+        lugarRecogidaCoordinate = nil
+        destinoCoordinate = nil
         fechaInicio = Date()
         franjaHoraria = "09:00-10:00"
         nombrePasajero = ""

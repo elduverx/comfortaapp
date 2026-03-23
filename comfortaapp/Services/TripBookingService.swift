@@ -37,8 +37,19 @@ class TripBookingService: ObservableObject {
                 }
                 
                 // Calculate fare using existing pricing service
-                let distance = self.calculateDistance(from: pickupLocation.coordinate.clLocationCoordinate, to: destinationLocation.coordinate.clLocationCoordinate)
-                let baseFare = PricingService.shared.calculateFare(distance: distance, vehicleType: vehicleType.rawValue)
+                let distance = self.calculateDistance(
+                    from: pickupLocation.coordinate.clLocationCoordinate,
+                    to: destinationLocation.coordinate.clLocationCoordinate
+                )
+                let includesAirportHub = PricingRules.hasAirportPortOrStation(
+                    origin: pickupLocation.address,
+                    destination: destinationLocation.address
+                )
+                let baseFare = PricingService.shared.calculateFare(
+                    distance: distance,
+                    vehicleType: vehicleType.rawValue,
+                    includesAirport: includesAirportHub
+                )
                 let duration = distance / 60 * 60 // Rough estimate
                 
                 let trip = Trip(

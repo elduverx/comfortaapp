@@ -10,7 +10,9 @@ struct LiquidSearchField: View {
     let placeholder: String
     let icon: String
     let onCurrentLocation: (() -> Void)?
+    let onMapSelection: (() -> Void)?
     let onSelection: ((String, CLLocationCoordinate2D) -> Void)?
+    let onFocusChange: ((Bool) -> Void)?
     
     @StateObject private var searchCompleter = SearchCompleter()
     @FocusState private var isFocused: Bool
@@ -24,14 +26,18 @@ struct LiquidSearchField: View {
         placeholder: String,
         icon: String = "magnifyingglass",
         onCurrentLocation: (() -> Void)? = nil,
-        onSelection: ((String, CLLocationCoordinate2D) -> Void)? = nil
+        onMapSelection: (() -> Void)? = nil,
+        onSelection: ((String, CLLocationCoordinate2D) -> Void)? = nil,
+        onFocusChange: ((Bool) -> Void)? = nil
     ) {
         self._text = text
         self._selectedAddress = selectedAddress
         self.placeholder = placeholder
         self.icon = icon
         self.onCurrentLocation = onCurrentLocation
+        self.onMapSelection = onMapSelection
         self.onSelection = onSelection
+        self.onFocusChange = onFocusChange
     }
     
     var body: some View {
@@ -77,6 +83,7 @@ struct LiquidSearchField: View {
                         withAnimation(ComfortaDesign.Animation.medium) {
                             showSuggestions = focused && !text.isEmpty && !searchCompleter.results.isEmpty
                         }
+                        onFocusChange?(focused)
                     }
                     .onReceive(searchCompleter.$results) { results in
                         withAnimation(ComfortaDesign.Animation.medium) {
@@ -111,6 +118,21 @@ struct LiquidSearchField: View {
                         Image(systemName: "location.fill")
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(ComfortaDesign.Colors.primaryGreen)
+                    }
+                    .transition(.scale.combined(with: .opacity))
+                }
+
+                // Map Selection Button
+                if let onMapSelection = onMapSelection, text.isEmpty {
+                    Button(action: {
+                        let impact = UIImpactFeedbackGenerator(style: .light)
+                        impact.impactOccurred()
+                        isFocused = false
+                        onMapSelection()
+                    }) {
+                        Image(systemName: "map.fill")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.blue)
                     }
                     .transition(.scale.combined(with: .opacity))
                 }
